@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use af2_server::files::find_config_dir;
 use anyhow::{Context, Result, bail};
 use tokio::net::TcpListener;
 
@@ -50,7 +51,7 @@ fn parse_options() -> Result<Option<Options>> {
 async fn run(options: Options) -> Result<()> {
     let config_dir = match options.config {
         Some(dir) => dir,
-        None => config::find_config_dir()?,
+        None => find_config_dir()?,
     };
     let root = config_dir.canonicalize()?.parent().context("config has no parent")?.to_owned();
     let data = config::load(&config_dir, &root)?;
