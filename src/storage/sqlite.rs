@@ -5,9 +5,38 @@ use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use sqlx::{Sqlite, Transaction};
 
-use super::{CaughtFish, CharacterData, CharacterSummary, ItemEntry, Storage};
+use super::{CaughtFish, CharacterData, CharacterSummary, ItemEntry, Storage, UNKNOWN_BAIT, Vitals};
 
 const MAX_CONNECTIONS: u32 = 4;
+
+/// `schema.sql` only creates missing tables, so a column added later needs this.
+async fn add_column(pool: &SqlitePool, table: &str, column: &str, declaration: &str) -> Result<()> {
+    let info = format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'");
+    let found: Option<(i64,)> = sqlx::query_as(&info).fetch_optional(pool).await?;
+    if found.is_none() {
+        sqlx::raw_sql(&format!("ALTER TABLE {table} ADD COLUMN {column} {declaration}")).execute(pool).await?;
+    }
+    Ok(())
+}
+
+async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
+    add_column(pool, "fish", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
+    add_column(pool, "characters", "vip", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "characters", "life", "REAL").await?;
+    for column in ["stamina", "radiation", "food", "water", "work_points"] {
+        add_column(pool, "characters", column, "REAL NOT NULL DEFAULT 0").await?;
+    }
+    Ok(())
+}
+
+fn vitals_columns(character: &CharacterData) -> (Option<f32>, f32, f32, f32, f32, f32) {
+    match &character.vitals {
+        Some(Vitals { values: [life, stamina, radiation, food, water], work_points }) => {
+            (Some(*life), *stamina, *radiation, *food, *water, *work_points)
+        }
+        None => (None, 0.0, 0.0, 0.0, 0.0, 0.0),
+    }
+}
 
 pub struct SqliteStorage {
     pool: SqlitePool,
@@ -25,6 +54,7 @@ impl SqliteStorage {
             .connect_with(options)
             .await?;
         sqlx::raw_sql(include_str!("schema.sql")).execute(&pool).await?;
+        add_missing_columns(&pool).await?;
         Ok(Self { pool })
     }
 
@@ -46,7 +76,7 @@ impl SqliteStorage {
                 .await?;
         }
         for fish in &character.fish {
-            sqlx::query("INSERT INTO fish (id, character_id, species, grams, size_class, list, experience) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO fish (id, character_id, species, grams, size_class, list, experience, bait) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(fish.id)
                 .bind(id)
                 .bind(fish.species)
@@ -54,6 +84,7 @@ impl SqliteStorage {
                 .bind(fish.size_class)
                 .bind(fish.list)
                 .bind(fish.experience)
+                .bind(fish.bait)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -62,6 +93,14 @@ impl SqliteStorage {
                 .bind(id)
                 .bind(species)
                 .bind(grams)
+                .execute(&mut **transaction)
+                .await?;
+        }
+        for (bag, cells) in &character.bag_extra {
+            sqlx::query("INSERT INTO bag_extra (character_id, bag, cells) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(bag)
+                .bind(cells)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -93,9 +132,10 @@ impl Storage for SqliteStorage {
     }
 
     async fn create_character(&self, character: &CharacterData) -> Result<i64> {
+        let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
         let id = sqlx::query(
-            "INSERT INTO characters (account_id, name, level, experience, money, premium) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(character.account)
         .bind(&character.name)
@@ -103,6 +143,13 @@ impl Storage for SqliteStorage {
         .bind(character.experience)
         .bind(character.money)
         .bind(character.premium)
+        .bind(character.vip)
+        .bind(life)
+        .bind(stamina)
+        .bind(radiation)
+        .bind(food)
+        .bind(water)
+        .bind(work_points)
         .execute(&mut *transaction)
         .await?
         .last_insert_rowid();
@@ -112,13 +159,13 @@ impl Storage for SqliteStorage {
     }
 
     async fn load_character(&self, id: i64) -> Result<Option<CharacterData>> {
-        let row: Option<(i64, String, i32, i64, i64, i64)> = sqlx::query_as(
-            "SELECT account_id, name, level, experience, money, premium FROM characters WHERE id = ?",
+        let row: Option<(i64, String, i32, i64, i64, i64, bool, Option<f32>, f32, f32, f32, f32, f32)> = sqlx::query_as(
+            "SELECT account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points FROM characters WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((account, name, level, experience, money, premium)) = row else {
+        let Some((account, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points)) = row else {
             return Ok(None);
         };
 
@@ -129,8 +176,8 @@ impl Storage for SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
 
-        let fish: Vec<(i64, i32, i32, i32, i32, i32)> = sqlx::query_as(
-            "SELECT id, species, grams, size_class, list, experience FROM fish WHERE character_id = ? ORDER BY id",
+        let fish: Vec<(i64, i32, i32, i32, i32, i32, i32)> = sqlx::query_as(
+            "SELECT id, species, grams, size_class, list, experience, bait FROM fish WHERE character_id = ? ORDER BY id",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -138,6 +185,12 @@ impl Storage for SqliteStorage {
 
         let records: Vec<(i32, i32)> =
             sqlx::query_as("SELECT species, grams FROM records WHERE character_id = ?")
+                .bind(id)
+                .fetch_all(&self.pool)
+                .await?;
+
+        let bag_extra: Vec<(i32, i32)> =
+            sqlx::query_as("SELECT bag, cells FROM bag_extra WHERE character_id = ?")
                 .bind(id)
                 .fetch_all(&self.pool)
                 .await?;
@@ -150,6 +203,8 @@ impl Storage for SqliteStorage {
             experience,
             money,
             premium,
+            vip,
+            vitals: life.map(|life| Vitals { values: [life, stamina, radiation, food, water], work_points }),
             items: items
                 .into_iter()
                 .map(|(id, bag, cell, count, durability, template)| ItemEntry {
@@ -163,30 +218,40 @@ impl Storage for SqliteStorage {
                 .collect(),
             fish: fish
                 .into_iter()
-                .map(|(id, species, grams, size_class, list, experience)| CaughtFish {
+                .map(|(id, species, grams, size_class, list, experience, bait)| CaughtFish {
                     id,
                     species,
                     grams,
                     size_class,
+                    bait,
                     list,
                     experience,
                 })
                 .collect(),
             records: records.into_iter().collect(),
+            bag_extra: bag_extra.into_iter().collect(),
         }))
     }
 
     async fn save_character(&self, character: &CharacterData) -> Result<()> {
+        let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ? WHERE id = ?")
+        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ? WHERE id = ?")
             .bind(character.level)
             .bind(character.experience)
             .bind(character.money)
             .bind(character.premium)
+            .bind(character.vip)
+            .bind(life)
+            .bind(stamina)
+            .bind(radiation)
+            .bind(food)
+            .bind(water)
+            .bind(work_points)
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
-        for table in ["items", "fish", "records"] {
+        for table in ["items", "fish", "records", "bag_extra"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE character_id = ?"))
                 .bind(character.id)
                 .execute(&mut *transaction)
@@ -237,11 +302,14 @@ mod tests {
             experience: 40,
             money: 500,
             premium: 5,
+            vip: true,
+            vitals: Some(Vitals { values: [90.0, 80.5, 70.0, 60.0, 50.0], work_points: 12.5 }),
             items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010 }],
-            fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, list: 0, experience: 12 }],
+            fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12 }],
             ..Default::default()
         };
         character.records.insert(7, 300);
+        character.bag_extra.insert(52, 5);
         character.id = store.create_character(&character).await.unwrap();
 
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);
@@ -250,6 +318,23 @@ mod tests {
         character.money = 900;
         store.save_character(&character).await.unwrap();
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);
+    }
+
+    #[tokio::test]
+    async fn old_catches_get_a_bait() {
+        let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::raw_sql("CREATE TABLE fish (id INTEGER PRIMARY KEY); INSERT INTO fish (id) VALUES (1); CREATE TABLE characters (id INTEGER PRIMARY KEY); INSERT INTO characters (id) VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        add_missing_columns(&pool).await.unwrap();
+        add_missing_columns(&pool).await.unwrap();
+
+        let (bait,): (i32,) = sqlx::query_as("SELECT bait FROM fish").fetch_one(&pool).await.unwrap();
+        assert_eq!(bait, UNKNOWN_BAIT);
+        let (vip,): (bool,) = sqlx::query_as("SELECT vip FROM characters").fetch_one(&pool).await.unwrap();
+        assert!(!vip);
     }
 
     #[tokio::test]

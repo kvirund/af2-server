@@ -5,10 +5,23 @@ use anyhow::Result;
 
 use super::{Conn, Outcome, Session, active, character, inventory};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::CatalogItem;
+use crate::config::{CatalogItem, ShopSettings};
 use crate::messages as msg;
 
 const DEFAULT_CATEGORY: i32 = 10;
+
+/// The level an item asks for, from its description. The client only colours it
+/// in the tooltip, so the shop has to enforce it.
+fn minimal_level(xml: &str) -> i32 {
+    xml.split_once("<minimalLevel>")
+        .and_then(|(_, rest)| rest.split('<').next())
+        .and_then(|level| level.parse().ok())
+        .unwrap_or(1)
+}
+
+fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool {
+    !settings.enforce_levels || minimal_level(&item.xml) <= level
+}
 
 fn digits_as_numbers(text: &str) -> Vec<i32> {
     text.split(|c: char| !c.is_ascii_digit()).filter_map(|part| part.parse().ok()).collect()
@@ -18,12 +31,13 @@ fn digits_as_numbers(text: &str) -> Vec<i32> {
 /// window opens and 1300 when a tab is chosen.
 ///
 /// Reply case 1300: int shop, int n, n x (int category, int item count), int m,
-/// m x (int template, string "money|premium|item", 3 x double, bool).
+/// m x (int template, string "money|premium|item", 3 x double, bool can be bought). With `false` the client refuses the purchase.
 pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
     let mut r = message.reader();
     let shop = r.int32()?;
     let wanted = digits_as_numbers(&r.string()?);
 
+    let level = active(&mut session.player)?.data.level;
     let conn = &session.conn;
     let catalog = &conn.world.catalog;
     let mut listed: Vec<&CatalogItem> = catalog.for_sale().filter(|item| wanted.contains(&item.kind)).collect();
@@ -47,7 +61,7 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     w.int32(listed.len() as i32);
     for item in &listed {
         w.int32(item.id).string(&format!("{}|0|0", item.cost));
-        w.double(0.0).double(0.0).double(0.0).boolean(false);
+        w.double(0.0).double(0.0).double(0.0).boolean(level_allows(&conn.world.settings.shop, level, item));
     }
     conn.send(msg::SHOP_LIST, w.finish()).await?;
     conn.log(&format!("   -> 1300 shop {shop}: {} items, {} categories", listed.len(), categories.len()));
@@ -76,6 +90,12 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
         return Ok(Outcome::Unanswered);
     };
 
+    if !level_allows(&world.settings.shop, player.data.level, item) {
+        send_status(conn, "none=0").await?;
+        conn.log(&format!("   -> 1310 item {template} needs a higher level"));
+        return Ok(Outcome::Answered);
+    }
+
     let before = player.data.money;
     match inventory::buy(conn, player, item, count).await? {
         Err(error) => {
@@ -95,6 +115,25 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn item(xml: &str) -> CatalogItem {
+        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, xml: xml.to_owned() }
+    }
+
+    #[test]
+    fn an_item_waits_for_its_level() {
+        let settings = ShopSettings { enforce_levels: true, hidden_kinds: vec![], hidden_items: vec![], prices: Default::default() };
+        let rod = item("<base><minimalLevel>10</minimalLevel></base>");
+        assert!(!level_allows(&settings, 9, &rod));
+        assert!(level_allows(&settings, 10, &rod));
+        assert!(level_allows(&settings, 1, &item("<base></base>")));
+    }
+
+    #[test]
+    fn levels_can_be_switched_off() {
+        let settings = ShopSettings { enforce_levels: false, hidden_kinds: vec![], hidden_items: vec![], prices: Default::default() };
+        assert!(level_allows(&settings, 1, &item("<minimalLevel>40</minimalLevel>")));
+    }
 
     #[test]
     fn categories_parse_from_the_client_string() {

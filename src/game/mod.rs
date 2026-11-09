@@ -5,11 +5,15 @@ mod character;
 mod fishing;
 mod inventory;
 mod keepnet;
+mod panels;
+mod perks;
 mod shop;
 mod travel;
+mod vitals;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 use tokio::sync::{Notify, mpsc};
@@ -69,6 +73,8 @@ pub struct Bite {
     pub species: i32,
     pub grams: i32,
     pub size_class: i32,
+    pub bait: i32,
+    pub bait_item: i64,
 }
 
 /// A character in play. `data` is what gets saved; the rest lasts one session.
@@ -77,11 +83,23 @@ pub struct Player {
     pub location: i32,
     pub bites_by_rod: HashMap<i32, Bite>,
     pub landed: HashMap<i64, CaughtFish>,
+    pub last_tick: Instant,
+    pub last_save: Instant,
+    pub last_active: Instant,
 }
 
 impl Player {
     fn new(data: CharacterData) -> Self {
-        Self { data, location: fishing::DEFAULT_LOCATION, bites_by_rod: HashMap::new(), landed: HashMap::new() }
+        let now = Instant::now();
+        Self {
+            data,
+            location: fishing::DEFAULT_LOCATION,
+            bites_by_rod: HashMap::new(),
+            landed: HashMap::new(),
+            last_tick: now,
+            last_save: now,
+            last_active: now,
+        }
     }
 }
 
@@ -109,6 +127,11 @@ impl Session {
     }
 }
 
+/// Time passing for the character, if enough of it has.
+pub async fn tick(session: &mut Session) -> Result<()> {
+    vitals::tick(session).await
+}
+
 /// The character in play. A borrow of the field alone leaves `conn` usable.
 fn active(player: &mut Option<Player>) -> Result<&mut Player> {
     player.as_mut().ok_or_else(|| anyhow!("no character has entered the game"))
@@ -123,6 +146,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
 
         msg::TRAVEL | msg::TRAVEL_ARRIVE => travel::go(session, message).await,
         msg::TRAVEL_OPTIONS => travel::options(session, message).await,
+        msg::BASE_LIST => travel::return_to_base(session).await,
         msg::TRAVEL_START => {
             session.conn.log("   map travel started");
             Ok(Outcome::Answered)
@@ -143,6 +167,19 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         // The original server decided what each NPC offered, and the buyer is
         // not told apart in the client, so every NPC buys fish for now.
         msg::NPC_TALK => keepnet::open_market(session, message).await,
+        msg::CHARACTER_CARD => panels::card(session, message).await,
+        id @ (msg::STATISTICS | msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
+            panels::empty_tab(session, message, id).await
+        }
+        msg::PERKS => perks::window(session).await,
+        msg::AUCTION => panels::auction(session).await,
+        msg::ARTELS => panels::artels(session).await,
+        id @ (msg::CRAFT | msg::CRAFT_STATION) => panels::crafting(session, message, id).await,
+        msg::STORAGE => panels::storage(session).await,
+        msg::BAG_PRICE => panels::bag_price(session, message).await,
+        msg::BAG_BOUGHT => panels::buy_cells(session, message).await,
+        msg::ITEM_SPLIT => inventory::split_item(session, message).await,
+        msg::ITEM_USE => vitals::use_item(session, message).await,
         msg::FISH_PRICES => keepnet::prices(session, message).await,
         msg::FISH_SELL => keepnet::sell(session, message).await,
 

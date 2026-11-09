@@ -254,15 +254,15 @@ public sealed class Probe : IPhotonPeerListener
         probe.Send(1310, buy);
         probe.Pump(500);
 
-        // Put the fourth starter bait on the rod, then drop it back in the backpack.
+        // Drop the starter bait in the backpack, then put it back on the rod.
         byte[] move = new byte[16];
-        BitConverter.TryWriteBytes(move.AsSpan(0), ItemIds[7]);
-        BitConverter.TryWriteBytes(move.AsSpan(8), 100);
-        BitConverter.TryWriteBytes(move.AsSpan(12), 20);
-        probe.Send(182, move);
-        probe.Pump(300);
+        BitConverter.TryWriteBytes(move.AsSpan(0), ItemIds[5]);
         BitConverter.TryWriteBytes(move.AsSpan(8), -1);
         BitConverter.TryWriteBytes(move.AsSpan(12), 100);
+        probe.Send(182, move);
+        probe.Pump(300);
+        BitConverter.TryWriteBytes(move.AsSpan(8), 100);
+        BitConverter.TryWriteBytes(move.AsSpan(12), 20);
         probe.Send(182, move);
         probe.Pump(300);
 
@@ -281,6 +281,35 @@ public sealed class Probe : IPhotonPeerListener
             probe.Send(1120, biteRequest);
             probe.Pump(100);
         }
+
+        // Panel windows, warehouse, buying bag cells and moving part of a stack.
+        using (var text = new MemoryStream())
+        using (var writer = new BinaryWriter(text))
+        {
+            WriteString(writer, "?");
+            writer.Flush();
+            probe.Send(32, text.ToArray());
+        }
+        foreach (int tab in new[] { 1150, 30, 101, 40, 130, 1401, 330, 450 })
+        {
+            probe.Send(tab, BitConverter.GetBytes(0));
+        }
+        byte[] station = new byte[8];
+        BitConverter.TryWriteBytes(station.AsSpan(4), 1000);
+        probe.Send(1700, station);
+        probe.Send(1230, BitConverter.GetBytes(1));
+        probe.Send(210, BitConverter.GetBytes(1));
+        byte[] buyCells = new byte[8];
+        BitConverter.TryWriteBytes(buyCells.AsSpan(0), 1);
+        BitConverter.TryWriteBytes(buyCells.AsSpan(4), 1);
+        probe.Send(215, buyCells);
+        byte[] split = new byte[20];
+        BitConverter.TryWriteBytes(split.AsSpan(0), ItemIds[5]);
+        BitConverter.TryWriteBytes(split.AsSpan(8), 1);
+        BitConverter.TryWriteBytes(split.AsSpan(12), 52);
+        BitConverter.TryWriteBytes(split.AsSpan(16), 0);
+        probe.Send(200, split);
+        probe.Pump(800);
 
         // An id the server has no handler for, to exercise the UNANSWERED log.
         probe.Send(4242, [1, 2, 3]);

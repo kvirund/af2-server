@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, inventory, keepnet, travel};
+use super::{Account, Conn, Outcome, Player, Session, inventory, keepnet, panels, perks, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -15,7 +15,6 @@ const ANONYMOUS_KEY: &str = "local";
 /// The first entry is the sex, 1 for a man; the rest pick the first palette entry.
 const APPEARANCE: [u8; 17] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
-const ATTRIBUTE_COUNT: usize = 8;
 
 /// Client: long marker, string name, string password, string Steam id, string
 /// device id, string persona, bool Steam login, int pin.
@@ -140,12 +139,24 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
         session.conn.log("   took the character over from another connection");
     }
     let player = session.player.insert(Player::new(data));
+    let (progression, level) = (&world.settings.progression, player.data.level);
+    player.data.vitals.get_or_insert_with(|| vitals::full(progression, level));
+    let kind_of = |template| world.catalog.get(template).map_or(0, |item| item.kind);
+    let moved = inventory::move_old_backpack(&world.settings.bags, &mut player.data, kind_of);
+    if moved > 0 {
+        session.conn.save(player).await?;
+        session.conn.log(&format!("   moved {moved} items from the old backpack onto pages"));
+    }
 
     let start_base = world.settings.character.start_base;
     travel::send_base_list(&session.conn).await?;
     travel::send_base_details(&session.conn, start_base).await?;
     send_details(&session.conn, player, msg::CHARACTER_DETAILS).await?;
+    if player.data.vip {
+        keepnet::send_vip_icon(&session.conn).await?;
+    }
     inventory::send_all(&session.conn, player).await?;
+    perks::send(&session.conn, player).await?;
     keepnet::send_all(&session.conn, player).await?;
     session.conn.send(msg::LOAD_BASE, Vec::new()).await?;
     session.conn.log(&format!("   -> 145, 150, 100, 180, 174, 175, 151 entered as {character_id}"));
@@ -168,20 +179,29 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int32(settings.character.start_base).int32(0); // base, location
     w.int32(0).int64(0);
 
-    for per_level in &progression.vitals_per_level {
-        let vital = progression.base_vital + (character.level - 1) * per_level;
-        w.int32(vital).single(vital as f32);
+    let current = character.vitals.clone().unwrap_or_else(|| vitals::full(progression, character.level));
+    for (max, value) in vitals::maxima(progression, character.level).iter().zip(current.values) {
+        w.int32(*max as i32).single(value);
     }
 
     w.int32(0);
-    for _ in 0..ATTRIBUTE_COUNT {
-        w.int32(1);
+    let bonuses = perks::worn_bonuses(&settings.bags, &conn.world.catalog, character);
+    for value in perks::attributes(&bonuses) {
+        w.int32(value);
     }
     w.int32(0).int32(0).int32(0);
     w.single(0.0).single(0.0).single(0.0);
-    w.int32(0); // count of the int array that follows
+    let bags = &settings.bags;
+    w.int32(bags.pages);
+    for bag in 1..=bags.pages {
+        w.int32(panels::cells_in(bags, character, bag));
+    }
     w.int32(APPEARANCE.len() as i32).bytes(&APPEARANCE);
     conn.send(message_id, w.finish()).await
+}
+
+pub async fn send_update(conn: &Conn, player: &Player) -> Result<()> {
+    send_details(conn, player, msg::CHARACTER_UPDATE).await
 }
 
 /// Case 155: long gained, long current, float skill share, long base, float

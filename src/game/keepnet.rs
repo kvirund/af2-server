@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+use chrono::{Local, TimeDelta};
 
 use super::{Conn, Outcome, Player, Session, active, inventory};
 use crate::afc::{AfcMessage, AfcWriter};
@@ -25,7 +26,7 @@ const FULL_DEMAND: f32 = 1.0;
 /// The record `OIJEGJLCFCF.LIMJEKJAILL` reads, shared by cases 175 and 1130.
 pub fn write_fish(w: &mut AfcWriter, fish: &CaughtFish) {
     w.int64(fish.id).int32(fish.species).int32(fish.grams);
-    w.int32(fish.size_class).int32(0).int32(fish.list);
+    w.int32(fish.size_class).int32(fish.bait).int32(fish.list);
     w.boolean(false).boolean(fish.size_class == TROPHY_CLASS).boolean(false);
     w.string("").string("");
 }
@@ -103,6 +104,22 @@ pub async fn swap_keepnets(session: &mut Session) -> Result<Outcome> {
     send_all(conn, player).await?;
     conn.log("   -> 181, 174, 175 keepnets swapped");
     Ok(Outcome::Answered)
+}
+
+/// Ends the same way as a bought patent would, though `true` below keeps it on.
+const VIP_DAYS: i64 = 365;
+/// The client's flag for a bought VIP patent, which alone enables the market's
+/// "prices" and "sell all" buttons.
+const VIP_ICON: i32 = 20;
+
+/// Case 260: until the end int icon, 3 x double for its tooltip, end date, bool
+/// never expires. Has to follow case 100, which clears the icons.
+pub async fn send_vip_icon(conn: &Conn) -> Result<()> {
+    let mut w = AfcWriter::new();
+    w.int32(VIP_ICON).double(0.0).double(0.0).double(0.0);
+    w.date_time(Local::now().naive_local() + TimeDelta::days(VIP_DAYS));
+    w.boolean(true);
+    conn.send(msg::ACTIVE_ICONS, w.finish()).await
 }
 
 /// The rarer the species, the dearer it sells.

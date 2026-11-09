@@ -10,11 +10,11 @@ use anyhow::{Context, Result};
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, character, keepnet};
+use super::{Bite, Outcome, Session, active, character, keepnet, inventory, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
-use crate::storage::CaughtFish;
+use crate::storage::{CaughtFish, UNKNOWN_BAIT};
 
 pub const DEFAULT_LOCATION: i32 = 4;
 
@@ -23,13 +23,14 @@ const LARGE_CLASS: i32 = 1;
 
 /// Rod, two three-double vectors.
 const DEPTH_OFFSET: usize = 4 + 24 + 24;
+/// Smallest fish, in grams, for each bait size class: the second number of the
+/// item's `basePar`. The client dips the float once for anything lighter, with
+/// no bite to set the hook on. Other classes have no minimum.
+const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
 const NIGHT_START_HOUR: f64 = 21.5;
 const NIGHT_END_HOUR: f64 = 4.5;
 
-/// Behaviour for each fight phase; the client's FishOnRod fills in the same default.
-const DEFAULT_BEHAVIOUR: &str = "0:0+100";
-
-fn is_night(settings: &FishingSettings) -> bool {
+pub(super) fn is_night(settings: &FishingSettings) -> bool {
     let now = Local::now().time();
     let hours = f64::from(now.num_seconds_from_midnight()) / 3600.0;
     let game_hour = (hours * settings.game_hours_per_real_hour) % 24.0;
@@ -38,6 +39,7 @@ fn is_night(settings: &FishingSettings) -> bool {
 
 struct Conditions {
     bait: Option<i32>,
+    min_grams: f64,
     depth: f64,
     bottom: f64,
     night: bool,
@@ -57,6 +59,9 @@ fn candidates<'a>(
                 && !species.baits.is_empty()
                 && !species.baits.contains(&bait)
             {
+                return None;
+            }
+            if f64::from(species.large_grams) < conditions.min_grams {
                 return None;
             }
             if conditions.depth < f64::from(species.min_depth_cm) {
@@ -98,8 +103,16 @@ fn lerp(from: f64, to: f64, t: f64) -> i32 {
     (from + (to - from) * t).round() as i32
 }
 
+fn bait_min_grams(xml: &str) -> f64 {
+    let class = xml
+        .split_once("<basePar>")
+        .and_then(|(_, rest)| rest.split('/').nth(1))
+        .and_then(|class| class.parse::<usize>().ok());
+    class.and_then(|class| BAIT_MIN_GRAMS.get(class).copied()).unwrap_or(0.0)
+}
+
 /// Returns grams and size class for two rolls in `0..1`.
-fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, roll: f64, point: f64) -> (i32, i32) {
+fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, roll: f64, point: f64) -> (i32, i32) {
     let trophy_share = if depth > settings.trophy_depth_cm {
         settings.trophy_share * settings.deep_trophy_multiplier
     } else {
@@ -107,7 +120,7 @@ fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, roll: 
     };
     let trophy = f64::from(species.trophy_grams);
     let large = f64::from(species.large_grams);
-    let small = f64::from(species.small_grams);
+    let small = f64::from(species.small_grams).max(min_grams);
 
     if roll < trophy_share {
         (lerp(trophy, trophy * settings.top_weight_factor, point * point), TROPHY_CLASS)
@@ -135,9 +148,15 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let conn = &session.conn;
     let world = &conn.world;
     let settings = &world.settings.fishing;
+    vitals::keep_busy(player);
 
     let bait = player.data.items.iter().find(|item| item.id == bait_id).map(|item| item.template);
-    let conditions = Conditions { bait, depth, bottom, night: is_night(settings) };
+    let min_grams = if random::<f64>() < settings.small_fish_nibble_share {
+        0.0
+    } else {
+        bait.and_then(|template| world.catalog.get(template)).map_or(0.0, |item| bait_min_grams(&item.xml))
+    };
+    let conditions = Conditions { bait, min_grams, depth, bottom, night: is_night(settings) };
     let options = candidates(&world.fish, settings, player.location, &conditions);
     let total: f64 = options.iter().map(|(_, weight)| weight).sum();
     let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
@@ -150,8 +169,8 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let species = pick(&options, total, random());
-    let (grams, size_class) = roll_weight(settings, species, depth, random(), random());
-    player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class });
+    let (grams, size_class) = roll_weight(settings, species, depth, min_grams, random(), random());
+    player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
 
     let small = f64::from(species.small_grams);
     let top = f64::from(species.trophy_grams) * settings.top_weight_factor;
@@ -164,7 +183,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     w.boolean(true);
     w.int32(0); // read and discarded
     w.int32(grams);
-    w.string(DEFAULT_BEHAVIOUR);
+    w.string(&settings.bite_behaviour);
     w.single(0.0); // shy-bite modifier
     w.single(speed as f32);
     w.single((stamina * hardiness) as f32);
@@ -210,6 +229,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         species: bite.species,
         grams: bite.grams,
         size_class: bite.size_class,
+        bait: bite.bait,
         list: keepnet::IN_USE_LIST,
         experience: experience_for(progression, bite.grams, bite.size_class),
     };
@@ -223,7 +243,10 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     conn.send(msg::FISH_LANDED, w.finish()).await?;
 
     conn.log(&format!("   -> 1130 landed species {} {} g as fish {}, worth {shown} exp", fish.species, fish.grams, fish.id));
+    let effort = &conn.world.settings.vitals;
+    vitals::tire(player, effort.stamina_per_fish + effort.stamina_per_kg * fish.grams as f32 / 1000.0);
     player.landed.insert(fish.id, fish);
+    inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
     Ok(Outcome::Answered)
 }
 
@@ -267,6 +290,9 @@ mod tests {
     fn settings() -> FishingSettings {
         FishingSettings {
             bite_chance: 1.0,
+            bite_behaviour: String::new(),
+            small_fish_nibble_share: 0.0,
+            bait_per_catch: 1,
             full_bite_weight: 8.0,
             large_share: 0.3,
             trophy_share: 0.1,
@@ -310,15 +336,15 @@ mod tests {
     #[test]
     fn rolls_land_in_their_size_class() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.05, 0.0), (5000, TROPHY_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.2, 0.0), (1000, LARGE_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.9, 0.0), (100, 0));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.05, 0.0), (5000, TROPHY_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.2, 0.0), (1000, LARGE_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.9, 0.0), (100, 0));
     }
 
     #[test]
     fn deep_water_doubles_trophies() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 400.0, 0.15, 0.0).1, TROPHY_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 400.0, 0.0, 0.15, 0.0).1, TROPHY_CLASS);
     }
 
     #[test]
@@ -331,11 +357,33 @@ mod tests {
     }
 
     #[test]
+    fn bait_size_class_comes_from_the_item() {
+        assert_eq!(bait_min_grams("<base><basePar>150/1/0</basePar></base>"), 500.0);
+        assert_eq!(bait_min_grams("<base><basePar>110/0/0</basePar></base>"), 0.0);
+        assert_eq!(bait_min_grams("<base><basePar>105/1010/0</basePar></base>"), 0.0);
+        assert_eq!(bait_min_grams("<base></base>"), 0.0);
+    }
+
+    #[test]
+    fn a_big_bait_skips_fish_too_small_for_it() {
+        let table = FishTable::for_tests(vec![species()], 4);
+        let conditions = |min_grams| Conditions { bait: Some(1010), min_grams, depth: 50.0, bottom: 100.0, night: false };
+        assert_eq!(candidates(&table, &settings(), 4, &conditions(1000.0)).len(), 1);
+        assert!(candidates(&table, &settings(), 4, &conditions(1001.0)).is_empty());
+    }
+
+    #[test]
+    fn a_rolled_weight_reaches_the_bait_minimum() {
+        let (settings, species) = (settings(), species());
+        assert_eq!(roll_weight(&settings, &species, 50.0, 500.0, 0.9, 0.0), (500, 0));
+    }
+
+    #[test]
     fn wrong_bait_gets_no_bite() {
         let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = Conditions { bait: Some(7), depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(7), min_grams: 0.0, depth: 50.0, bottom: 100.0, night: false };
         assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
-        let conditions = Conditions { bait: Some(1010), depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, depth: 50.0, bottom: 100.0, night: false };
         assert_eq!(candidates(&table, &settings(), 4, &conditions).len(), 1);
     }
 }

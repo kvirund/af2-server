@@ -10,7 +10,14 @@ CREATE TABLE IF NOT EXISTS characters (
     level INTEGER NOT NULL,
     experience INTEGER NOT NULL,
     money INTEGER NOT NULL,
-    premium INTEGER NOT NULL
+    premium INTEGER NOT NULL,
+    vip INTEGER NOT NULL DEFAULT 0,
+    life REAL,
+    stamina REAL NOT NULL DEFAULT 0,
+    radiation REAL NOT NULL DEFAULT 0,
+    food REAL NOT NULL DEFAULT 0,
+    water REAL NOT NULL DEFAULT 0,
+    work_points REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS items (
@@ -30,7 +37,8 @@ CREATE TABLE IF NOT EXISTS fish (
     grams INTEGER NOT NULL,
     size_class INTEGER NOT NULL,
     list INTEGER NOT NULL,
-    experience INTEGER NOT NULL
+    experience INTEGER NOT NULL,
+    bait INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS records (
@@ -38,6 +46,13 @@ CREATE TABLE IF NOT EXISTS records (
     species INTEGER NOT NULL,
     grams INTEGER NOT NULL,
     PRIMARY KEY (character_id, species)
+);
+
+CREATE TABLE IF NOT EXISTS bag_extra (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    bag INTEGER NOT NULL,
+    cells INTEGER NOT NULL,
+    PRIMARY KEY (character_id, bag)
 );
 
 CREATE TABLE IF NOT EXISTS id_sequence (

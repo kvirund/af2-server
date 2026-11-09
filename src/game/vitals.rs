@@ -1,0 +1,271 @@
+//! Health, stamina, radiation resistance, food and water.
+
+use std::time::Instant;
+
+use anyhow::Result;
+
+use super::{Conn, Outcome, Player, Session, active, fishing, inventory, travel};
+use crate::afc::{AfcMessage, AfcWriter};
+use crate::config::{ProgressionSettings, VitalsSettings};
+use crate::messages as msg;
+use crate::storage::Vitals;
+
+const COUNT: usize = 5;
+const LIFE: usize = 0;
+const STAMINA: usize = 1;
+const RADIATION: usize = 2;
+const FOOD: usize = 3;
+const WATER: usize = 4;
+
+const FOOD_KIND: i32 = 21;
+const DRINK_KIND: i32 = 22;
+const MEDICINE_KIND: i32 = 23;
+
+pub fn maxima(progression: &ProgressionSettings, level: i32) -> [f32; COUNT] {
+    let mut maxima = [progression.base_vital as f32; COUNT];
+    for (max, per_level) in maxima.iter_mut().zip(&progression.vitals_per_level) {
+        *max += ((level - 1) * per_level) as f32;
+    }
+    maxima
+}
+
+pub fn full(progression: &ProgressionSettings, level: i32) -> Vitals {
+    Vitals { values: maxima(progression, level), work_points: 0.0 }
+}
+
+struct Passing {
+    seconds: f32,
+    radiation: f32,
+    resting: bool,
+}
+
+fn advance(settings: &VitalsSettings, maxima: &[f32; COUNT], vitals: &mut Vitals, passing: &Passing) {
+    let seconds = passing.seconds;
+    let minutes = seconds / 60.0;
+    let values = &mut vitals.values;
+
+    let thirst = if values[FOOD] <= 0.0 { settings.no_food_water_factor } else { 1.0 };
+    values[WATER] -= settings.water_per_minute * thirst * minutes;
+    values[FOOD] -= settings.food_per_minute * minutes;
+    values[RADIATION] -= passing.radiation * settings.radiation_per_minute_per_point * minutes;
+    if values[WATER] <= 0.0 {
+        values[LIFE] -= settings.no_water_life_per_second * seconds;
+    }
+    if values[RADIATION] <= 0.0 {
+        values[LIFE] -= settings.no_resistance_life_per_second * seconds;
+    }
+    if passing.resting && values[FOOD] >= settings.rest_needs_food {
+        values[STAMINA] += settings.rest_stamina_per_minute * minutes;
+    }
+    vitals.work_points = (vitals.work_points + settings.work_points_per_minute * minutes).min(settings.max_work_points);
+    keep_in_range(settings, maxima, vitals);
+}
+
+fn keep_in_range(settings: &VitalsSettings, maxima: &[f32; COUNT], vitals: &mut Vitals) {
+    for (value, max) in vitals.values.iter_mut().zip(maxima) {
+        *value = value.clamp(0.0, *max);
+    }
+    vitals.values[LIFE] = vitals.values[LIFE].max(settings.lowest_life);
+}
+
+/// Radiation where the character stands: the top of the base's range at night,
+/// the bottom by day, nothing inside a base.
+fn background(conn: &Conn, location: i32) -> f32 {
+    let settings = &conn.world.settings;
+    let Some(base) = travel::base_of(&settings.bases, location) else {
+        return 0.0;
+    };
+    let Some([low, high]) = settings.vitals.radiation.get(&base) else {
+        return 0.0;
+    };
+    if fishing::is_night(&settings.fishing) { *high } else { *low }
+}
+
+/// Runs off the client's regular traffic, so it stops when the client does.
+pub async fn tick(session: &mut Session) -> Result<()> {
+    let Some(player) = session.player.as_mut() else {
+        return Ok(());
+    };
+    let conn = &session.conn;
+    let settings = &conn.world.settings;
+    let seconds = player.last_tick.elapsed().as_secs_f32();
+    if seconds < settings.vitals.tick_seconds {
+        return Ok(());
+    }
+    player.last_tick = Instant::now();
+
+    let passing = Passing {
+        seconds,
+        radiation: background(conn, player.location),
+        resting: player.last_active.elapsed().as_secs_f32() >= settings.vitals.rest_after_seconds,
+    };
+    let limits = maxima(&settings.progression, player.data.level);
+    if let Some(vitals) = player.data.vitals.as_mut() {
+        advance(&settings.vitals, &limits, vitals, &passing);
+    }
+    send(conn, player).await?;
+
+    if player.last_save.elapsed().as_secs_f32() >= settings.vitals.save_every_seconds {
+        player.last_save = Instant::now();
+        conn.save(player).await?;
+    }
+    Ok(())
+}
+
+/// Case 1000: five floats, an unused vector, work points, an unused float.
+pub async fn send(conn: &Conn, player: &Player) -> Result<()> {
+    let Some(vitals) = &player.data.vitals else {
+        return Ok(());
+    };
+    let mut w = AfcWriter::new();
+    for value in vitals.values {
+        w.single(value);
+    }
+    w.double(0.0).double(0.0).double(0.0).single(vitals.work_points).single(0.0);
+    conn.send(msg::VITALS, w.finish()).await
+}
+
+/// The client asks about bites over and over while the bait is in the water,
+/// so this interrupts resting but costs nothing.
+pub fn keep_busy(player: &mut Player) {
+    player.last_active = Instant::now();
+}
+
+pub fn tire(player: &mut Player, amount: f32) {
+    keep_busy(player);
+    if let Some(vitals) = player.data.vitals.as_mut() {
+        vitals.values[STAMINA] = (vitals.values[STAMINA] - amount).max(0.0);
+    }
+}
+
+/// What each of the three `basePar` numbers changes, as the item's tooltip says.
+fn targets(kind: i32) -> Option<[usize; 3]> {
+    match kind {
+        FOOD_KIND => Some([FOOD, WATER, RADIATION]),
+        DRINK_KIND => Some([FOOD, WATER, STAMINA]),
+        MEDICINE_KIND => Some([LIFE, RADIATION, STAMINA]),
+        _ => None,
+    }
+}
+
+fn effect(kind: i32, xml: &str) -> Option<[(usize, f32); 3]> {
+    let targets = targets(kind)?;
+    let numbers = xml.split_once("<basePar>")?.1.split('<').next()?;
+    let mut numbers = numbers.split('/').map(|number| number.parse::<f32>().unwrap_or(0.0));
+    Some(targets.map(|target| (target, numbers.next().unwrap_or(0.0))))
+}
+
+/// Client: long item. It takes the piece away itself and expects no reply, only
+/// the new values.
+pub async fn use_item(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let id = message.reader().int64()?;
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let settings = &conn.world.settings;
+
+    let Some(template) = player.data.items.iter().find(|item| item.id == id).map(|item| item.template) else {
+        conn.log(&format!("   use: character has no item {id}"));
+        return Ok(Outcome::Unanswered);
+    };
+    let found = conn.world.catalog.get(template).and_then(|item| effect(item.kind, &item.xml));
+    let Some(changes) = found else {
+        conn.log(&format!("   use: item {template} is not food or medicine"));
+        return Ok(Outcome::Unanswered);
+    };
+
+    let limits = maxima(&settings.progression, player.data.level);
+    if let Some(vitals) = player.data.vitals.as_mut() {
+        for (target, change) in changes {
+            vitals.values[target] += change;
+        }
+        keep_in_range(&settings.vitals, &limits, vitals);
+    }
+    inventory::remove_one(&mut player.data, id);
+    conn.save(player).await?;
+    send(conn, player).await?;
+    conn.log(&format!("   -> 1000 used item {template}"));
+    Ok(Outcome::Answered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> VitalsSettings {
+        VitalsSettings {
+            tick_seconds: 5.0,
+            save_every_seconds: 30.0,
+            food_per_minute: 1.0,
+            water_per_minute: 1.0,
+            no_food_water_factor: 3.0,
+            no_water_life_per_second: 0.2,
+            no_resistance_life_per_second: 0.1,
+            rest_stamina_per_minute: 6.0,
+            rest_after_seconds: 30.0,
+            rest_needs_food: 30.0,
+            stamina_per_fish: 1.0,
+            stamina_per_kg: 0.5,
+            radiation_per_minute_per_point: 0.1,
+            lowest_life: 1.0,
+            work_points_per_minute: 10.0,
+            max_work_points: 3000.0,
+            radiation: Default::default(),
+        }
+    }
+
+    const LIMITS: [f32; COUNT] = [100.0; COUNT];
+
+    fn vitals(values: [f32; COUNT]) -> Vitals {
+        Vitals { values, work_points: 0.0 }
+    }
+
+    fn after_a_minute(start: [f32; COUNT], radiation: f32, resting: bool) -> Vitals {
+        let mut vitals = vitals(start);
+        advance(&settings(), &LIMITS, &mut vitals, &Passing { seconds: 60.0, radiation, resting });
+        vitals
+    }
+
+    #[test]
+    fn food_and_water_run_down_and_work_points_grow() {
+        let result = after_a_minute([100.0, 50.0, 100.0, 100.0, 100.0], 0.0, false);
+        assert_eq!(result.values, [100.0, 50.0, 100.0, 99.0, 99.0]);
+        assert_eq!(result.work_points, 10.0);
+    }
+
+    #[test]
+    fn without_food_water_goes_three_times_faster() {
+        assert_eq!(after_a_minute([100.0, 50.0, 100.0, 0.0, 100.0], 0.0, false).values[WATER], 97.0);
+    }
+
+    #[test]
+    fn without_water_life_drains() {
+        let result = after_a_minute([100.0, 50.0, 100.0, 100.0, 0.0], 0.0, false);
+        assert!((result.values[LIFE] - 88.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn life_stops_at_the_lowest_value() {
+        assert_eq!(after_a_minute([2.0, 50.0, 100.0, 100.0, 0.0], 0.0, false).values[LIFE], 1.0);
+    }
+
+    #[test]
+    fn resting_needs_enough_food() {
+        assert_eq!(after_a_minute([100.0, 50.0, 100.0, 80.0, 100.0], 0.0, true).values[STAMINA], 56.0);
+        assert_eq!(after_a_minute([100.0, 50.0, 100.0, 20.0, 100.0], 0.0, true).values[STAMINA], 50.0);
+        assert_eq!(after_a_minute([100.0, 50.0, 100.0, 80.0, 100.0], 0.0, false).values[STAMINA], 50.0);
+    }
+
+    #[test]
+    fn radiation_wears_down_resistance() {
+        assert_eq!(after_a_minute([100.0, 50.0, 100.0, 100.0, 100.0], 20.0, false).values[RADIATION], 98.0);
+    }
+
+    #[test]
+    fn the_three_numbers_depend_on_the_kind_of_item() {
+        let xml = "<base><basePar>10/-15/5</basePar></base>";
+        assert_eq!(effect(21, xml), Some([(FOOD, 10.0), (WATER, -15.0), (RADIATION, 5.0)]));
+        assert_eq!(effect(22, xml), Some([(FOOD, 10.0), (WATER, -15.0), (STAMINA, 5.0)]));
+        assert_eq!(effect(23, xml), Some([(LIFE, 10.0), (RADIATION, -15.0), (STAMINA, 5.0)]));
+        assert_eq!(effect(1, xml), None);
+    }
+}

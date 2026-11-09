@@ -1,5 +1,7 @@
 //! Bases, locations and the global map.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use chrono::Local;
 
@@ -10,6 +12,8 @@ use crate::messages as msg;
 
 const ANY_LEVEL: i32 = 1000;
 const OPTION_RECORD_LEN: usize = 12;
+/// Every base lists this location: the base itself.
+const BASE_LOCATION: i32 = 0;
 
 /// Case 145: the catalogue of bases, read until the payload ends.
 pub async fn send_base_list(conn: &Conn) -> Result<()> {
@@ -88,6 +92,29 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     Ok(Outcome::Answered)
 }
 
+/// Which base a fishing location belongs to.
+pub(super) fn base_of(bases: &BTreeMap<i32, BaseSettings>, location: i32) -> Option<i32> {
+    if location == BASE_LOCATION {
+        return None;
+    }
+    bases.iter().find(|(_, info)| info.locations.contains(&location)).map(|(id, _)| *id)
+}
+
+/// Client: int 0, from the map's button for the player's own base. Reply: case
+/// 150, which also resets the client's current location, then 151 to load it.
+pub async fn return_to_base(session: &mut Session) -> Result<Outcome> {
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let settings = &conn.world.settings;
+
+    let base = base_of(&settings.bases, player.location).unwrap_or(settings.character.start_base);
+    player.location = BASE_LOCATION;
+    send_base_details(conn, base).await?;
+    conn.send(msg::LOAD_BASE, Vec::new()).await?;
+    conn.log(&format!("   -> 150, 151 back to base {base}"));
+    Ok(Outcome::Answered)
+}
+
 /// Client: triples of base, location, point. Reply case 134: until the end,
 /// int base, int location, int min level, int max level, 3 x double cost (item,
 /// count, money). The client then loads the global map.
@@ -116,4 +143,21 @@ pub async fn options(session: &mut Session, message: &AfcMessage) -> Result<Outc
     conn.send(msg::TRAVEL_OPTIONS, w.finish()).await?;
     conn.log(&format!("   -> 134 map with {count} destination(s)"));
     Ok(Outcome::Answered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base(locations: Vec<i32>) -> BaseSettings {
+        BaseSettings { min_level: 1, travel_cost: 0, locations }
+    }
+
+    #[test]
+    fn a_location_leads_back_to_its_own_base() {
+        let bases = BTreeMap::from([(1, base(vec![0, 1, 2])), (2, base(vec![0, 21]))]);
+        assert_eq!(base_of(&bases, 21), Some(2));
+        assert_eq!(base_of(&bases, BASE_LOCATION), None);
+        assert_eq!(base_of(&bases, 99), None);
+    }
 }

@@ -20,16 +20,28 @@ pub struct ItemEntry {
     pub template: i32,
 }
 
+/// Worms: shown for catches saved before baits were recorded.
+pub const UNKNOWN_BAIT: i32 = 1010;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaughtFish {
     pub id: i64,
     pub species: i32,
     pub grams: i32,
     pub size_class: i32,
+    /// Item template of the bait; the catch window needs it to draw anything.
+    pub bait: i32,
     /// Which keepnet holds it: 0 is the one in use, 1 the spare.
     pub list: i32,
     /// Experience before the personal-record multiplier.
     pub experience: i32,
+}
+
+/// Life, stamina, radiation resistance, food and water, plus work points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Vitals {
+    pub values: [f32; 5],
+    pub work_points: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -45,6 +57,12 @@ pub struct CharacterData {
     pub fish: Vec<CaughtFish>,
     /// Heaviest fish kept, in grams, by species id.
     pub records: HashMap<i32, i32>,
+    /// Cells bought on top of the starting size, by bag.
+    pub bag_extra: HashMap<i32, i32>,
+    /// Opens the VIP-only buttons. Set by hand in the database for now.
+    pub vip: bool,
+    /// `None` until the character first enters the game: it starts at full.
+    pub vitals: Option<Vitals>,
 }
 
 #[derive(Debug, Clone)]

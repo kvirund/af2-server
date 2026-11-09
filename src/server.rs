@@ -81,6 +81,7 @@ async fn handle_frame(
     gaps: &mut BTreeMap<i32, u32>,
     started: Instant,
 ) -> Result<()> {
+    game::tick(session).await?;
     match frame {
         Frame::Ping { timestamp } => {
             let server_time = started.elapsed().as_millis() as i32;
