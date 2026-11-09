@@ -1,0 +1,118 @@
+// Настройки сервера. Изменения применяются после перезапуска сервера.
+// Рыба и водоёмы лежат отдельно, в config/fish.json.
+{
+  "server": {
+    "bind": "0.0.0.0",
+    "port": 9201
+  },
+
+  "character": {
+    "name": "Рыбак",
+    "level": 1,
+    // Действуют только для нового персонажа. Прогресс хранится в data/af2.sqlite.
+    "startingMoney": 50000,
+    "premiumMoney": 500,
+    "startBase": 1
+  },
+
+  "fishing": {
+    // Шанс поклёвки за один запрос клиента (раз в 5 секунд).
+    "biteChance": 0.35,
+    // Суммарный вес видов в точке, при котором шанс достигает biteChance.
+    "fullBiteWeight": 8,
+
+    // Какая доля улова крупная и трофейная, остальное маленькая.
+    "largeShare": 0.30,
+    "trophyShare": 0.08,
+    // Глубже этого трофеи клюют в deepTrophyMultiplier раз чаще.
+    "trophyDepthCm": 300,
+    "deepTrophyMultiplier": 2,
+    // Самая тяжёлая рыба относительно трофейного порога.
+    "topWeightFactor": 1.5,
+
+    // Донная рыба: насколько близко ко дну нужно быть, и множители шанса.
+    "nearBottomCm": 40,
+    "nearBottomBonus": 2.5,
+    "awayFromBottomFactor": 0.35,
+    // Рыба, любящая глубину: множители при глубине точки от trophyDepthCm и меньше.
+    "deepWaterBonus": 2,
+    "shallowWaterFactor": 0.5,
+
+    // Игровых часов за реальный. Ночь считается с 21:30 до 4:30.
+    "gameHoursPerRealHour": 12,
+
+    // Вываживание: скорость и выносливость растут с весом в заданных пределах.
+    "gramsPerSpeed": 500,
+    "minSpeed": 1,
+    "maxSpeed": 4,
+    "gramsPerStamina": 40,
+    "minStamina": 8,
+    "maxStamina": 60,
+    "hardyStaminaFactor": 1.4
+  },
+
+  // Опыт и уровни. Формулы придуманы: на клиенте их нет.
+  // Только множитель личного рекорда взят из текста клиента («опыт x3»).
+  "progression": {
+    "maxLevel": 40,
+    // Опыта до следующего уровня: levelBase * уровень ^ levelExponent
+    "levelBase": 50,
+    "levelExponent": 1.3,
+    // Опыт за рыбу в садке: (за штуку + за кг * вес) * множитель размера
+    "experiencePerFish": 8,
+    "experiencePerKg": 12,
+    "largeExperienceFactor": 1.5,
+    "trophyExperienceFactor": 3,
+    "recordExperienceFactor": 3,
+    // Показатели на 1 уровне и прибавка за каждый следующий:
+    // жизнь, выносливость, радстойкость, еда, вода
+    "baseVital": 100,
+    "vitalsPerLevel": [5, 2, 1, 1, 1]
+  },
+
+  // Цены скупщика придуманы. Цена за кг: basePricePerKg * редкость * размер,
+  // редкость = sqrt(наибольший share / share вида из fish.json), от 1 у самой частой рыбы.
+  "fishMarket": {
+    "basePricePerKg": 100,
+    "largePriceFactor": 1.5,
+    "trophyPriceFactor": 3
+  },
+
+  "travel": {
+    // true: клиент не пустит на базу ниже её minLevel.
+    // false: все базы открыты с самого начала
+    "enforceLevels": true
+  },
+
+  // minLevel взят из гайдов игроков, для баз 5 и 9 придуман.
+  // travelCost: цена перехода через карту, в оригинале неизвестна.
+  // locations: номера из maps.txt, 0 это сама база.
+  "bases": {
+    "1": { "name": "Убежище", "minLevel": 1, "travelCost": 0, "locations": [0, 1, 2, 3, 4, 5, 6] },
+    "2": { "name": "Плато великанов", "minLevel": 1, "travelCost": 0, "locations": [0, 21, 22, 23] },
+    "3": { "name": "Пустошь", "minLevel": 10, "travelCost": 0, "locations": [0, 31, 32, 33, 34] },
+    "4": { "name": "Озеро Кулгу", "minLevel": 15, "travelCost": 0, "locations": [0, 41, 42, 43, 44, 45, 46, 47] },
+    "5": { "name": "Озеро Изумрудное", "minLevel": 20, "travelCost": 0, "locations": [0, 51, 52, 53, 54] },
+    "6": { "name": "Карасиный пруд", "minLevel": 5, "travelCost": 0, "locations": [0, 61, 62, 63, 64, 65, 66] },
+    "7": { "name": "Разливы", "minLevel": 15, "travelCost": 0, "locations": [0, 71, 72, 73, 74, 75, 76, 77, 78, 79] },
+    "8": { "name": "Дельта", "minLevel": 30, "travelCost": 0, "locations": [0, 81, 82, 83, 84, 85, 86, 87, 88] },
+    "9": { "name": "Река Пра", "minLevel": 25, "travelCost": 0, "locations": [0, 91, 92, 93, 94] }
+  },
+
+  // Стартовые вещи нового сохранения. item: номер предмета в клиенте.
+  // Сумки: 100 поплавочная (1 удилище, 2 катушка, 3 леска, 4 поплавок, 10 крючок, 20 наживка),
+  // 60 одежда (6 садок), 0 инвентарь (ячейка = ряд * 9 + столбец).
+  "starterKit": [
+    { "item": 1304, "bag": 100, "cell": 1, "count": 1 },
+    { "item": 1305, "bag": 100, "cell": 2, "count": 1 },
+    { "item": 1306, "bag": 100, "cell": 3, "count": 1 },
+    { "item": 1299, "bag": 100, "cell": 4, "count": 1 },
+    { "item": 1005, "bag": 100, "cell": 10, "count": 1 },
+    { "item": 1445, "bag": 100, "cell": 20, "count": 100 },
+    { "item": 1342, "bag": 60, "cell": 6, "count": 1 },
+    { "item": 1016, "bag": 0, "cell": 0, "count": 100 },
+    { "item": 1052, "bag": 0, "cell": 1, "count": 100 },
+    { "item": 1436, "bag": 0, "cell": 2, "count": 100 },
+    { "item": 1412, "bag": 0, "cell": 3, "count": 100 }
+  ]
+}

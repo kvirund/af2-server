@@ -1,0 +1,15 @@
+# Build output
+target/
+bin/
+obj/
+
+# Generated from your own copy of the game; never published
+data/
+
+# Local state
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+trace.log
+backup/
+legacy-csharp/
