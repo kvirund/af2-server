@@ -3,6 +3,7 @@ name = "af2-server"
 version = "0.1.0"
 edition = "2024"
 description = "Unofficial server for the Atom Fishing 2 client"
+license = "MIT"
 
 [dependencies]
 anyhow = "1"
