@@ -77,6 +77,11 @@ pub struct ProgressionSettings {
 }
 
 impl ProgressionSettings {
+    /// With the character's discount applied, never below one point.
+    pub fn experience_needed(&self, level: i32, cost_factor: f64) -> i64 {
+        ((self.experience_to_next(level) as f64 * cost_factor).round() as i64).max(1)
+    }
+
     pub fn experience_to_next(&self, level: i32) -> i64 {
         (self.level_base * f64::from(level).powf(self.level_exponent)).round() as i64
     }
@@ -102,8 +107,10 @@ pub struct BagSettings {
     /// Which item kinds (`wtype`) each page holds.
     pub page_kinds: BTreeMap<i32, Vec<i32>>,
     pub other_page: i32,
-    /// Bags whose items count as worn for skills and attributes.
-    pub gear_bags: Vec<i32>,
+    /// Bags whose items all add their skills and attributes.
+    pub worn_bags: Vec<i32>,
+    /// Assembled tackle: only the best set counts for each skill.
+    pub tackle_bags: Vec<i32>,
 }
 
 impl BagSettings {
@@ -111,9 +118,21 @@ impl BagSettings {
         self.page_kinds.iter().find(|(_, kinds)| kinds.contains(&kind)).map_or(self.other_page, |(page, _)| *page)
     }
 
+    pub fn holds_gear(&self, bag: i32) -> bool {
+        self.worn_bags.contains(&bag) || self.tackle_bags.contains(&bag)
+    }
+
     fn pages_exist(&self) -> bool {
         self.page_kinds.keys().chain([&self.other_page]).all(|page| (1..=self.pages).contains(page))
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttributeSettings {
+    pub education_experience_percent: f64,
+    pub education_level_cost_percent: f64,
+    pub luck_trophy_percent: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,10 +158,15 @@ pub struct VitalsSettings {
     pub radiation: BTreeMap<i32, [f32; 2]>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Default, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShopSettings {
     pub enforce_levels: bool,
+    /// Each base sells what `config/shops.json` lists; otherwise everything with a price.
+    #[serde(default)]
+    pub guide_stock: bool,
+    #[serde(skip)]
+    pub stock: ShopStock,
     /// Item kinds nobody can wear, so the shop leaves them out.
     pub hidden_kinds: Vec<i32>,
     pub hidden_items: Vec<i32>,
@@ -150,7 +174,49 @@ pub struct ShopSettings {
     pub prices: BTreeMap<i32, i64>,
 }
 
+/// Things that come up on the hook together with a fish.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LootSettings {
+    pub chance_percent: f64,
+    pub items: Vec<LootItem>,
+    pub base_card_chance_percent: f64,
+    /// Base id to the card of that base.
+    pub base_cards: BTreeMap<i32, i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LootItem {
+    pub item: i32,
+    pub weight: f64,
+    #[serde(default = "one")]
+    pub count: i32,
+}
+
+fn one() -> i32 {
+    1
+}
+
+/// `config/shops.json`: item ids each base's shops sell.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShopStock {
+    /// Bases without a list of their own sell this base's.
+    pub fallback_base: i32,
+    pub bases: BTreeMap<i32, Vec<i32>>,
+}
+
 impl ShopSettings {
+    /// What a base sells, or `None` when every priced item is for sale.
+    pub fn stocked(&self, base: i32) -> Option<&[i32]> {
+        if !self.guide_stock {
+            return None;
+        }
+        let stock = &self.stock;
+        Some(stock.bases.get(&base).or_else(|| stock.bases.get(&stock.fallback_base)).map_or(&[], Vec::as_slice))
+    }
+
     /// Applies the settings to one catalog item; a price of 0 means "not for sale".
     fn adjust(&self, item: &mut CatalogItem) {
         if let Some(price) = self.prices.get(&item.id) {
@@ -196,6 +262,9 @@ pub struct Settings {
     pub bags: BagSettings,
     pub shop: ShopSettings,
     pub vitals: VitalsSettings,
+    pub attributes: AttributeSettings,
+    #[serde(default)]
+    pub loot: LootSettings,
     pub travel: TravelSettings,
     pub bases: BTreeMap<i32, BaseSettings>,
     pub starter_kit: Vec<StarterItem>,
@@ -256,10 +325,6 @@ impl FishTable {
     }
 }
 
-fn one() -> i32 {
-    1
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CatalogItem {
     pub id: i32,
@@ -293,14 +358,42 @@ impl Catalog {
     }
 }
 
+/// One line of `data/recipes.json`, which the launcher extracts from the game.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Recipe {
+    pub id: i32,
+    pub station: i32,
+    /// Which list of the shared station shows it.
+    pub show: i32,
+    pub category: i32,
+    pub kind: i32,
+    /// Known without learning.
+    pub default: bool,
+    pub result: [f64; 3],
+    pub cost: [f64; 3],
+    pub time: i32,
+    #[serde(default)]
+    pub crit_chance: f64,
+    /// Made instead of `result` on a critical success; item 0 means none.
+    #[serde(default)]
+    pub crit_result: [f64; 3],
+    pub profession: i32,
+    pub profession_level: i32,
+    pub ingredients: Vec<[f64; 6]>,
+}
+
 pub struct GameData {
     pub settings: Settings,
     pub fish: FishTable,
     pub catalog: Catalog,
+    pub recipes: Vec<Recipe>,
 }
 
 pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
-    let settings: Settings = read_commented(&config_dir.join("settings.json"))?;
+    let mut settings: Settings = read_commented(&config_dir.join("settings.json"))?;
+    if settings.shop.guide_stock {
+        settings.shop.stock = read_commented(&config_dir.join("shops.json"))?;
+    }
     check_bite_behaviour(&settings.fishing.bite_behaviour)?;
     if !(1..=MAX_BAG_PAGES).contains(&settings.bags.pages) || settings.bags.cells_per_purchase < 1 {
         bail!("bags: pages must be 1..={MAX_BAG_PAGES} and cellsPerPurchase at least 1");
@@ -323,6 +416,12 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
     let index = items.iter().enumerate().map(|(position, item)| (item.id, position)).collect();
     let catalog = Catalog { items, index };
 
+    let recipes_path = root.join("data").join("recipes.json");
+    let text = fs::read_to_string(&recipes_path).with_context(|| {
+        format!("{} is missing; run af2-launcher first", recipes_path.display())
+    })?;
+    let recipes: Vec<Recipe> = serde_json::from_str(&text).with_context(|| recipes_path.display().to_string())?;
+
     for kit in &settings.starter_kit {
         if catalog.get(kit.item).is_none() {
             bail!("settings.json: starterKit has unknown item {}", kit.item);
@@ -336,6 +435,7 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
             by_location: fish.locations,
         },
         catalog,
+        recipes,
     })
 }
 
@@ -369,6 +469,7 @@ mod tests {
             hidden_kinds: vec![29],
             hidden_items: vec![7],
             prices: [(5, 1000)].into(),
+            ..Default::default()
         };
         let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, xml: String::new() };
         let cost = |mut item: CatalogItem| {

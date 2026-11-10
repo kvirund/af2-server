@@ -59,6 +59,8 @@ pub struct CharacterData {
     pub records: HashMap<i32, i32>,
     /// Cells bought on top of the starting size, by bag.
     pub bag_extra: HashMap<i32, i32>,
+    /// Uses left of each learned recipe, negative meaning no limit.
+    pub known_recipes: HashMap<i32, i32>,
     /// Opens the VIP-only buttons. Set by hand in the database for now.
     pub vip: bool,
     /// `None` until the character first enters the game: it starts at full.

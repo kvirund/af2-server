@@ -1,9 +1,9 @@
-//! The shop window. Every shop sells the whole catalogue: which trader stocked
-//! what was decided on the shut-down server.
+//! The shop window. What each base sells comes from a player guide
+//! (`config/shops.json`); with that switched off every priced item is for sale.
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Session, active, character, inventory};
+use super::{Conn, Outcome, Player, Session, active, character, inventory, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{CatalogItem, ShopSettings};
 use crate::messages as msg;
@@ -23,6 +23,16 @@ fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool
     !settings.enforce_levels || minimal_level(&item.xml) <= level
 }
 
+/// Priced items this character's base sells.
+fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
+    let world = &conn.world;
+    let base = travel::current_base(&world.settings, player);
+    match world.settings.shop.stocked(base) {
+        Some(ids) => ids.iter().filter_map(|id| world.catalog.get(*id)).filter(|item| item.cost > 0).collect(),
+        None => world.catalog.for_sale().collect(),
+    }
+}
+
 fn digits_as_numbers(text: &str) -> Vec<i32> {
     text.split(|c: char| !c.is_ascii_digit()).filter_map(|part| part.parse().ok()).collect()
 }
@@ -37,16 +47,17 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let shop = r.int32()?;
     let wanted = digits_as_numbers(&r.string()?);
 
-    let level = active(&mut session.player)?.data.level;
+    let player = active(&mut session.player)?;
+    let level = player.data.level;
     let conn = &session.conn;
-    let catalog = &conn.world.catalog;
-    let mut listed: Vec<&CatalogItem> = catalog.for_sale().filter(|item| wanted.contains(&item.kind)).collect();
+    let stock = on_sale(conn, player);
+    let mut listed: Vec<&CatalogItem> = stock.iter().copied().filter(|item| wanted.contains(&item.kind)).collect();
     if listed.is_empty() {
-        listed = catalog.for_sale().filter(|item| item.kind == DEFAULT_CATEGORY).collect();
+        listed = stock.iter().copied().filter(|item| item.kind == DEFAULT_CATEGORY).collect();
     }
 
     let mut categories: Vec<(i32, i32)> = Vec::new();
-    for item in catalog.for_sale() {
+    for item in &stock {
         match categories.iter_mut().find(|(kind, _)| *kind == item.kind) {
             Some((_, count)) => *count += 1,
             None => categories.push((item.kind, 1)),
@@ -85,8 +96,8 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
     let player = active(&mut session.player)?;
     let conn = &session.conn;
     let world = conn.world.clone();
-    let Some(item) = world.catalog.get(template).filter(|item| item.cost > 0) else {
-        conn.log(&format!("   buy: item {template} is not for sale"));
+    let Some(item) = on_sale(conn, player).into_iter().find(|item| item.id == template) else {
+        conn.log(&format!("   buy: item {template} is not for sale here"));
         return Ok(Outcome::Unanswered);
     };
 
@@ -115,6 +126,7 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ShopStock;
 
     fn item(xml: &str) -> CatalogItem {
         CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, xml: xml.to_owned() }
@@ -122,7 +134,7 @@ mod tests {
 
     #[test]
     fn an_item_waits_for_its_level() {
-        let settings = ShopSettings { enforce_levels: true, hidden_kinds: vec![], hidden_items: vec![], prices: Default::default() };
+        let settings = ShopSettings { enforce_levels: true, ..Default::default() };
         let rod = item("<base><minimalLevel>10</minimalLevel></base>");
         assert!(!level_allows(&settings, 9, &rod));
         assert!(level_allows(&settings, 10, &rod));
@@ -131,8 +143,18 @@ mod tests {
 
     #[test]
     fn levels_can_be_switched_off() {
-        let settings = ShopSettings { enforce_levels: false, hidden_kinds: vec![], hidden_items: vec![], prices: Default::default() };
+        let settings = ShopSettings { enforce_levels: false, ..Default::default() };
         assert!(level_allows(&settings, 1, &item("<minimalLevel>40</minimalLevel>")));
+    }
+
+    #[test]
+    fn a_base_without_a_list_sells_the_fallback() {
+        let mut settings = ShopSettings { guide_stock: true, ..Default::default() };
+        settings.stock = ShopStock { fallback_base: 1, bases: [(1, vec![10]), (6, vec![20])].into() };
+        assert_eq!(settings.stocked(6), Some(&[20][..]));
+        assert_eq!(settings.stocked(9), Some(&[10][..]));
+        settings.guide_stock = false;
+        assert_eq!(settings.stocked(6), None);
     }
 
     #[test]

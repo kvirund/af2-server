@@ -110,8 +110,8 @@ pub async fn move_item(session: &mut Session, message: &AfcMessage) -> Result<Ou
         return Ok(Outcome::Unanswered);
     };
     let gear_changed = {
-        let gear = &conn.world.settings.bags.gear_bags;
-        gear.contains(&item.bag) || gear.contains(&bag)
+        let bags = &conn.world.settings.bags;
+        bags.holds_gear(item.bag) || bags.holds_gear(bag)
     };
     (item.bag, item.cell) = (bag, cell);
     let moved = item.clone();
@@ -172,6 +172,31 @@ pub async fn use_up(conn: &Conn, player: &mut Player, id: i64, amount: i32) -> R
     conn.save(player).await
 }
 
+/// Takes pieces from one item without telling the client; returns what to send.
+pub fn take_pieces(character: &mut CharacterData, id: i64, amount: i32) -> Option<Result<ItemEntry, i64>> {
+    match take_from_stack(true, character, id, amount) {
+        Used::NotAStack => None,
+        Used::Left(item) => Some(Ok(item)),
+        Used::Gone => Some(Err(id)),
+    }
+}
+
+/// Spends one piece of any item, single ones included.
+pub async fn use_piece(conn: &Conn, player: &mut Player, id: i64) -> Result<()> {
+    match take_from_stack(true, &mut player.data, id, 1) {
+        Used::NotAStack => return Ok(()),
+        Used::Left(item) => {
+            conn.log(&format!("   -> 181 item {id}, {} left", item.count));
+            send_updates(conn, player.data.id, &[item]).await?;
+        }
+        Used::Gone => {
+            conn.log(&format!("   -> 190 item {id} used up"));
+            send_removed(conn, id).await?;
+        }
+    }
+    conn.save(player).await
+}
+
 /// Takes one piece away without telling the client, which has already done so.
 pub fn remove_one(character: &mut CharacterData, id: i64) {
     if let Some(index) = character.items.iter().position(|item| item.id == id) {
@@ -183,7 +208,7 @@ pub fn remove_one(character: &mut CharacterData, id: i64) {
 }
 
 /// Case 190: item ids until the end of the message.
-async fn send_removed(conn: &Conn, id: i64) -> Result<()> {
+pub async fn send_removed(conn: &Conn, id: i64) -> Result<()> {
     let mut w = AfcWriter::new();
     w.int64(id);
     conn.send(msg::ITEMS_REMOVED, w.finish()).await
@@ -320,9 +345,18 @@ pub fn plan_purchase(
     if item.cost.saturating_mul(i64::from(count)) > character.money {
         return Err(BuyError::NoMoney);
     }
+    plan_pieces(settings, character, item, count.saturating_mul(item.shop_count.max(1)))
+}
 
+/// Where this many pieces of an item would go: onto stacks first, then free cells.
+pub fn plan_pieces(
+    settings: &BagSettings,
+    character: &CharacterData,
+    item: &CatalogItem,
+    pieces: i32,
+) -> Result<Purchase, BuyError> {
     let capacity = if item.stacks { item.max_count.max(1) } else { 1 };
-    let mut left = count.saturating_mul(item.shop_count.max(1));
+    let mut left = pieces;
     let mut topped = Vec::new();
     if item.stacks {
         for (index, held) in character.items.iter().enumerate() {
@@ -357,7 +391,27 @@ pub async fn buy(
         Ok(purchase) => purchase,
         Err(error) => return Ok(Err(error)),
     };
+    let changed = place(conn, player, item, purchase).await?;
+    player.data.money -= item.cost * i64::from(count);
+    conn.save(player).await?;
+    Ok(Ok(changed))
+}
 
+/// Gives pieces of an item for free, as loot or a crafted result. The caller
+/// sends the changed items and saves.
+pub async fn give(
+    conn: &Conn,
+    player: &mut Player,
+    item: &CatalogItem,
+    pieces: i32,
+) -> Result<Result<Vec<ItemEntry>, BuyError>> {
+    match plan_pieces(&conn.world.settings.bags, &player.data, item, pieces) {
+        Ok(plan) => Ok(Ok(place(conn, player, item, plan).await?)),
+        Err(error) => Ok(Err(error)),
+    }
+}
+
+async fn place(conn: &Conn, player: &mut Player, item: &CatalogItem, purchase: Purchase) -> Result<Vec<ItemEntry>> {
     let mut changed = Vec::with_capacity(purchase.topped.len() + purchase.new_stacks.len());
     for (index, added) in purchase.topped {
         player.data.items[index].count += added;
@@ -375,10 +429,7 @@ pub async fn buy(
         player.data.items.push(entry.clone());
         changed.push(entry);
     }
-
-    player.data.money -= item.cost * i64::from(count);
-    conn.save(player).await?;
-    Ok(Ok(changed))
+    Ok(changed)
 }
 
 #[cfg(test)]
@@ -404,7 +455,8 @@ mod tests {
             purchase_premium: 10,
             page_kinds: [(1, vec![10])].into(),
             other_page: 2,
-            gear_bags: vec![60],
+            worn_bags: vec![60],
+            tackle_bags: vec![],
         }
     }
 

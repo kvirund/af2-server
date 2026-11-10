@@ -1,7 +1,7 @@
 //! Windows that open from the panel buttons and from objects in the base.
 //!
 //! The client draws most of the character card from what it already knows. Lists
-//! that lived on the shut-down server (auction lots, artels, recipes, titles) go
+//! that lived on the shut-down server (auction lots, artels, titles) go
 //! out empty, so the windows open instead of leaving the client waiting.
 
 use anyhow::Result;
@@ -59,19 +59,6 @@ pub async fn artels(session: &mut Session) -> Result<Outcome> {
 
 /// Client 1700: int 0, int station; 1701: int station. Reply: int station, then
 /// the recipes. An empty list makes the window say there is nothing to make.
-pub async fn crafting(session: &mut Session, message: &AfcMessage, id: i32) -> Result<Outcome> {
-    let mut r = message.reader();
-    if id == msg::CRAFT {
-        r.int32()?;
-    }
-    let station = r.int32().unwrap_or(0);
-    let mut w = AfcWriter::new();
-    w.int32(station);
-    session.conn.send(id, w.finish()).await?;
-    session.conn.log(&format!("   -> {id} station {station}, no recipes"));
-    Ok(Outcome::Answered)
-}
-
 /// Client: the warehouse number. Case 1230 takes its size in cells.
 pub async fn storage(session: &mut Session) -> Result<Outcome> {
     let player = active(&mut session.player)?;
@@ -168,7 +155,8 @@ mod tests {
             purchase_premium: 10,
             page_kinds: Default::default(),
             other_page: 10,
-            gear_bags: vec![60],
+            worn_bags: vec![60],
+            tackle_bags: vec![],
         }
     }
 

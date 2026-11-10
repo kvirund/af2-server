@@ -104,6 +104,14 @@ impl SqliteStorage {
                 .execute(&mut **transaction)
                 .await?;
         }
+        for (recipe, uses) in &character.known_recipes {
+            sqlx::query("INSERT INTO known_recipes (character_id, recipe, uses) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(recipe)
+                .bind(uses)
+                .execute(&mut **transaction)
+                .await?;
+        }
         Ok(())
     }
 }
@@ -195,6 +203,12 @@ impl Storage for SqliteStorage {
                 .fetch_all(&self.pool)
                 .await?;
 
+        let known_recipes: Vec<(i32, i32)> =
+            sqlx::query_as("SELECT recipe, uses FROM known_recipes WHERE character_id = ?")
+                .bind(id)
+                .fetch_all(&self.pool)
+                .await?;
+
         Ok(Some(CharacterData {
             id,
             account,
@@ -230,6 +244,7 @@ impl Storage for SqliteStorage {
                 .collect(),
             records: records.into_iter().collect(),
             bag_extra: bag_extra.into_iter().collect(),
+            known_recipes: known_recipes.into_iter().collect(),
         }))
     }
 
@@ -251,7 +266,7 @@ impl Storage for SqliteStorage {
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
-        for table in ["items", "fish", "records", "bag_extra"] {
+        for table in ["items", "fish", "records", "bag_extra", "known_recipes"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE character_id = ?"))
                 .bind(character.id)
                 .execute(&mut *transaction)
@@ -310,6 +325,7 @@ mod tests {
         };
         character.records.insert(7, 300);
         character.bag_extra.insert(52, 5);
+        character.known_recipes.insert(142, 10);
         character.id = store.create_character(&character).await.unwrap();
 
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);

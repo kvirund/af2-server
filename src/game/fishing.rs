@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, character, keepnet, inventory, vitals};
+use super::{Bite, Outcome, Session, active, character, keepnet, inventory, loot, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
@@ -112,12 +112,13 @@ fn bait_min_grams(xml: &str) -> f64 {
 }
 
 /// Returns grams and size class for two rolls in `0..1`.
-fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, roll: f64, point: f64) -> (i32, i32) {
-    let trophy_share = if depth > settings.trophy_depth_cm {
-        settings.trophy_share * settings.deep_trophy_multiplier
-    } else {
-        settings.trophy_share
-    };
+fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
+    let trophy_share = luck
+        * if depth > settings.trophy_depth_cm {
+            settings.trophy_share * settings.deep_trophy_multiplier
+        } else {
+            settings.trophy_share
+        };
     let trophy = f64::from(species.trophy_grams);
     let large = f64::from(species.large_grams);
     let small = f64::from(species.small_grams).max(min_grams);
@@ -169,7 +170,8 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let species = pick(&options, total, random());
-    let (grams, size_class) = roll_weight(settings, species, depth, min_grams, random(), random());
+    let luck = perks::effects(conn, player).trophy;
+    let (grams, size_class) = roll_weight(settings, species, depth, min_grams, luck, random(), random());
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
 
     let small = f64::from(species.small_grams);
@@ -201,14 +203,14 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     Ok(Outcome::Answered)
 }
 
-fn experience_for(progression: &ProgressionSettings, grams: i32, size_class: i32) -> i32 {
+fn experience_for(progression: &ProgressionSettings, grams: i32, size_class: i32, education: f64) -> i32 {
     let size = match size_class {
         TROPHY_CLASS => progression.trophy_experience_factor,
         LARGE_CLASS => progression.large_experience_factor,
         _ => 1.0,
     };
     let base = progression.experience_per_fish + progression.experience_per_kg * f64::from(grams) / 1000.0;
-    ((base * size).round() as i32).max(1)
+    ((base * size * education).round() as i32).max(1)
 }
 
 /// Client: int rod. Reply case 1130: int rod, the fish record, int shown
@@ -224,6 +226,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         return Ok(Outcome::Unanswered);
     };
 
+    let education = perks::effects(conn, player).experience;
     let fish = CaughtFish {
         id: conn.world.store.next_id().await?,
         species: bite.species,
@@ -231,7 +234,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         size_class: bite.size_class,
         bait: bite.bait,
         list: keepnet::IN_USE_LIST,
-        experience: experience_for(progression, bite.grams, bite.size_class),
+        experience: experience_for(progression, bite.grams, bite.size_class, education),
     };
     let is_record = bite.grams > player.data.records.get(&bite.species).copied().unwrap_or(0);
     let shown = if is_record { fish.experience * progression.record_experience_factor } else { fish.experience };
@@ -247,6 +250,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     vitals::tire(player, effort.stamina_per_fish + effort.stamina_per_kg * fish.grams as f32 / 1000.0);
     player.landed.insert(fish.id, fish);
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
+    loot::after_catch(conn, player).await?;
     Ok(Outcome::Answered)
 }
 
@@ -334,17 +338,24 @@ mod tests {
     }
 
     #[test]
+    fn luck_widens_the_trophy_share() {
+        let (settings, species) = (settings(), species());
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.15, 0.0).1, LARGE_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 2.0, 0.15, 0.0).1, TROPHY_CLASS);
+    }
+
+    #[test]
     fn rolls_land_in_their_size_class() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.05, 0.0), (5000, TROPHY_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.2, 0.0), (1000, LARGE_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 0.9, 0.0), (100, 0));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.05, 0.0), (5000, TROPHY_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.2, 0.0), (1000, LARGE_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.9, 0.0), (100, 0));
     }
 
     #[test]
     fn deep_water_doubles_trophies() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 400.0, 0.0, 0.15, 0.0).1, TROPHY_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 400.0, 0.0, 1.0, 0.15, 0.0).1, TROPHY_CLASS);
     }
 
     #[test]
@@ -375,7 +386,7 @@ mod tests {
     #[test]
     fn a_rolled_weight_reaches_the_bait_minimum() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 500.0, 0.9, 0.0), (500, 0));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 500.0, 1.0, 0.9, 0.0), (500, 0));
     }
 
     #[test]

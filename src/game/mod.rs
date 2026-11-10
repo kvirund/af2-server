@@ -2,8 +2,10 @@
 //! and own the character they change.
 
 mod character;
+mod crafting;
 mod fishing;
 mod inventory;
+mod loot;
 mod keepnet;
 mod panels;
 mod perks;
@@ -81,6 +83,8 @@ pub struct Bite {
 pub struct Player {
     pub data: CharacterData,
     pub location: i32,
+    /// The base the character is at or fishing from; location 0 alone does not say.
+    pub base: i32,
     pub bites_by_rod: HashMap<i32, Bite>,
     pub landed: HashMap<i64, CaughtFish>,
     pub last_tick: Instant,
@@ -94,6 +98,7 @@ impl Player {
         Self {
             data,
             location: fishing::DEFAULT_LOCATION,
+            base: 0,
             bites_by_rod: HashMap::new(),
             landed: HashMap::new(),
             last_tick: now,
@@ -174,7 +179,9 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::PERKS => perks::window(session).await,
         msg::AUCTION => panels::auction(session).await,
         msg::ARTELS => panels::artels(session).await,
-        id @ (msg::CRAFT | msg::CRAFT_STATION) => panels::crafting(session, message, id).await,
+        id @ (msg::CRAFT | msg::CRAFT_STATION) => crafting::station(session, message, id).await,
+        msg::RECIPE_LEARN => crafting::learn(session, message).await,
+        msg::CRAFT_MAKE => crafting::make(session, message).await,
         msg::STORAGE => panels::storage(session).await,
         msg::BAG_PRICE => panels::bag_price(session, message).await,
         msg::BAG_BOUGHT => panels::buy_cells(session, message).await,

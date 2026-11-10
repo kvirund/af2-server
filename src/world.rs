@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Local;
 use tokio::sync::Notify;
 
-use crate::config::{Catalog, FishTable, Settings};
+use crate::config::{Catalog, FishTable, Recipe, Settings};
 use crate::storage::Storage;
 
 pub struct Log {
@@ -68,6 +68,7 @@ pub struct World {
     pub settings: Settings,
     pub fish: FishTable,
     pub catalog: Catalog,
+    pub recipes: Vec<Recipe>,
     pub store: Box<dyn Storage>,
     pub log: Log,
     online: OnlineCharacters,
@@ -78,10 +79,11 @@ impl World {
         settings: Settings,
         fish: FishTable,
         catalog: Catalog,
+        recipes: Vec<Recipe>,
         store: Box<dyn Storage>,
         log: Log,
     ) -> Self {
-        Self { settings, fish, catalog, store, log, online: OnlineCharacters::default() }
+        Self { settings, fish, catalog, recipes, store, log, online: OnlineCharacters::default() }
     }
 
     /// Marks a character as played by this connection and disconnects anyone

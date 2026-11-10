@@ -75,6 +75,7 @@ async fn run(options: Options) -> Result<()> {
         data.settings,
         data.fish,
         data.catalog,
+        data.recipes,
         Box::new(store),
         Log::new(trace),
     ));

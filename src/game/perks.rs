@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use super::{Conn, Outcome, Player, Session, active};
 use crate::afc::AfcWriter;
-use crate::config::{BagSettings, Catalog};
+use crate::config::{AttributeSettings, BagSettings, Catalog};
 use crate::messages as msg;
 use crate::storage::CharacterData;
 
@@ -16,6 +16,8 @@ const ALL_ATTRIBUTES: i32 = 500;
 /// Strength, accuracy, luck and education, in the order of the details message.
 const ATTRIBUTE_PERKS: [i32; 4] = [510, 520, 540, 530];
 const BASE_ATTRIBUTE: i32 = 1;
+const LUCK_TOTAL: usize = 6;
+const EDUCATION_TOTAL: usize = 7;
 /// Named by some items but missing from the client's table of perks.
 const UNDEFINED_PERKS: [i32; 1] = [4];
 
@@ -26,18 +28,38 @@ fn item_perks(xml: &str) -> impl Iterator<Item = (i32, i32)> + '_ {
     })
 }
 
-/// Perk levels the worn gear gives. Two items with one perk do not add up: the
-/// higher level counts, as the client does for the parts of one item.
-pub fn worn_bonuses(bags: &BagSettings, catalog: &Catalog, character: &CharacterData) -> BTreeMap<i32, i32> {
+/// Bonuses of different worn items add up. Assembled tackle is several sets of
+/// which one is in hand, so each skill takes only its best set.
+fn combine(bags: &BagSettings, gear: impl Iterator<Item = (i32, i32, i32)>) -> BTreeMap<i32, i32> {
     let mut bonuses = BTreeMap::new();
-    let worn = character.items.iter().filter(|item| bags.gear_bags.contains(&item.bag));
-    for template in worn.filter_map(|item| catalog.get(item.template)) {
-        for (perk, level) in item_perks(&template.xml).filter(|(perk, _)| !UNDEFINED_PERKS.contains(perk)) {
-            let best = bonuses.entry(perk).or_insert(level);
-            *best = level.max(*best);
+    let mut in_sets = BTreeMap::new();
+    for (bag, perk, level) in gear {
+        if bags.worn_bags.contains(&bag) {
+            *bonuses.entry(perk).or_insert(0) += level;
+        } else if bags.tackle_bags.contains(&bag) {
+            *in_sets.entry((bag, perk)).or_insert(0) += level;
         }
     }
+    let mut best = BTreeMap::new();
+    for ((_, perk), level) in in_sets {
+        let top = best.entry(perk).or_insert(0);
+        *top = level.max(*top);
+    }
+    for (perk, level) in best {
+        *bonuses.entry(perk).or_insert(0) += level;
+    }
     bonuses
+}
+
+pub fn worn_bonuses(bags: &BagSettings, catalog: &Catalog, character: &CharacterData) -> BTreeMap<i32, i32> {
+    let gear = character.items.iter().filter_map(|item| Some((item.bag, catalog.get(item.template)?))).flat_map(
+        |(bag, template)| {
+            item_perks(&template.xml)
+                .filter(|(perk, _)| !UNDEFINED_PERKS.contains(perk))
+                .map(move |(perk, level)| (bag, perk, level))
+        },
+    );
+    combine(bags, gear)
 }
 
 /// Four base attributes, then the same four with the bonuses.
@@ -48,6 +70,28 @@ pub fn attributes(bonuses: &BTreeMap<i32, i32>) -> [i32; 8] {
         *total += bonus(perk) + bonus(&ALL_ATTRIBUTES);
     }
     values
+}
+
+/// What the client leaves to the server: nothing in it reads these two.
+#[derive(Debug, Clone, Copy)]
+pub struct Effects {
+    pub experience: f64,
+    pub level_cost: f64,
+    pub trophy: f64,
+}
+
+fn effects_of(settings: &AttributeSettings, attributes: &[i32; 8]) -> Effects {
+    let per_point = |points: i32, percent: f64| f64::from(points) * percent / 100.0;
+    let (luck, education) = (attributes[LUCK_TOTAL], attributes[EDUCATION_TOTAL]);
+    Effects {
+        experience: 1.0 + per_point(education, settings.education_experience_percent),
+        level_cost: (1.0 - per_point(education, settings.education_level_cost_percent)).max(0.0),
+        trophy: 1.0 + per_point(luck, settings.luck_trophy_percent),
+    }
+}
+
+pub fn effects(conn: &Conn, player: &Player) -> Effects {
+    effects_of(&conn.world.settings.attributes, &attributes(&bonuses_of(conn, player)))
 }
 
 /// Cases 1400 and 1401: int used, int limit, then until the end of the message
@@ -85,6 +129,51 @@ pub async fn window(session: &mut Session) -> Result<Outcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bags() -> BagSettings {
+        BagSettings {
+            pages: 1,
+            start_cells: 1,
+            storage_cells: 1,
+            cells_per_purchase: 1,
+            purchase_money: 1,
+            purchase_premium: 1,
+            page_kinds: Default::default(),
+            other_page: 1,
+            worn_bags: vec![60],
+            tackle_bags: vec![100, 101],
+        }
+    }
+
+    #[test]
+    fn different_worn_items_add_up() {
+        let gear = vec![(60, 540, 5), (60, 540, 1)];
+        assert_eq!(combine(&bags(), gear.into_iter()), [(540, 6)].into());
+    }
+
+    #[test]
+    fn tackle_sets_do_not_add_up_but_join_what_is_worn() {
+        let gear = vec![(100, 403, 1), (100, 403, 2), (101, 403, 2), (60, 403, 1)];
+        assert_eq!(combine(&bags(), gear.into_iter()), [(403, 4)].into());
+    }
+
+    #[test]
+    fn items_in_other_bags_give_nothing() {
+        assert!(combine(&bags(), vec![(1, 540, 5), (52, 530, 5)].into_iter()).is_empty());
+    }
+
+    #[test]
+    fn attributes_change_experience_cost_and_trophies() {
+        let settings = AttributeSettings {
+            education_experience_percent: 2.0,
+            education_level_cost_percent: 1.0,
+            luck_trophy_percent: 10.0,
+        };
+        let effects = effects_of(&settings, &[1, 1, 1, 1, 1, 1, 5, 10]);
+        assert!((effects.experience - 1.2).abs() < 1e-9);
+        assert!((effects.level_cost - 0.9).abs() < 1e-9);
+        assert!((effects.trophy - 1.5).abs() < 1e-9);
+    }
 
     #[test]
     fn perks_parse_from_the_item() {

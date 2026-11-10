@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS bag_extra (
     PRIMARY KEY (character_id, bag)
 );
 
+CREATE TABLE IF NOT EXISTS known_recipes (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    recipe INTEGER NOT NULL,
+    uses INTEGER NOT NULL,
+    PRIMARY KEY (character_id, recipe)
+);
+
 CREATE TABLE IF NOT EXISTS id_sequence (
     only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
     next_id INTEGER NOT NULL

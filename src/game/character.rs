@@ -173,7 +173,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int64(character.id);
     w.string(&character.name);
     w.int32(1).int32(character.level).int32(0); // sex, level, unknown
-    w.int64(character.experience).int64(progression.experience_to_next(character.level));
+    w.int64(character.experience).int64(progression.experience_needed(character.level, perks::effects(conn, player).level_cost));
     w.int64(character.money).int64(character.premium);
     w.string("");
     w.int32(settings.character.start_base).int32(0); // base, location
@@ -209,7 +209,8 @@ pub async fn send_update(conn: &Conn, player: &Player) -> Result<()> {
 /// next, two unread ints, then life, stamina, radiation, food and water gains.
 pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32, multiplier: i32) -> Result<()> {
     let gained = i64::from(experience) * i64::from(multiplier);
-    let reached = add_experience(&conn.world.settings.progression, &mut player.data, gained);
+    let cost = perks::effects(conn, player).level_cost;
+    let reached = add_experience(&conn.world.settings.progression, &mut player.data, gained, cost);
     conn.save(player).await?;
 
     let progression = &conn.world.settings.progression;
@@ -223,13 +224,13 @@ pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32,
     conn.log(&format!(
         "   -> 155 +{gained} exp, now {}/{} at level {}",
         player.data.experience,
-        progression.experience_to_next(player.data.level),
+        progression.experience_needed(player.data.level, cost),
         player.data.level
     ));
 
     for level in &reached {
         let mut w = AfcWriter::new();
-        w.int32(*level).int64(progression.experience_to_next(*level)).int32(0).int32(0);
+        w.int32(*level).int64(progression.experience_needed(*level, cost)).int32(0).int32(0);
         for per_level in &progression.vitals_per_level {
             w.int32(*per_level);
         }
@@ -248,13 +249,14 @@ fn add_experience(
     progression: &crate::config::ProgressionSettings,
     character: &mut CharacterData,
     amount: i64,
+    cost: f64,
 ) -> Vec<i32> {
     let mut reached = Vec::new();
     character.experience += amount;
     while character.level < progression.max_level
-        && character.experience >= progression.experience_to_next(character.level)
+        && character.experience >= progression.experience_needed(character.level, cost)
     {
-        character.experience -= progression.experience_to_next(character.level);
+        character.experience -= progression.experience_needed(character.level, cost);
         character.level += 1;
         reached.push(character.level);
     }
@@ -292,7 +294,7 @@ mod tests {
     fn experience_carries_over_levels() {
         let mut character = CharacterData { level: 1, ..Default::default() };
         // Level 1 needs 10, level 2 needs 20.
-        assert_eq!(add_experience(&progression(), &mut character, 35), vec![2, 3]);
+        assert_eq!(add_experience(&progression(), &mut character, 35, 1.0), vec![2, 3]);
         assert_eq!(character.level, 3);
         assert_eq!(character.experience, 5);
     }
@@ -300,7 +302,7 @@ mod tests {
     #[test]
     fn level_stops_at_the_cap() {
         let mut character = CharacterData { level: 3, ..Default::default() };
-        assert!(add_experience(&progression(), &mut character, 1000).is_empty());
+        assert!(add_experience(&progression(), &mut character, 1000, 1.0).is_empty());
         assert_eq!(character.level, 3);
     }
 }

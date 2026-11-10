@@ -7,7 +7,7 @@ use chrono::Local;
 
 use super::{Conn, Outcome, Player, Session, active, character};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::BaseSettings;
+use crate::config::{BaseSettings, Settings};
 use crate::messages as msg;
 
 const ANY_LEVEL: i32 = 1000;
@@ -80,6 +80,7 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     }
 
     player.location = location;
+    player.base = base;
 
     let mut w = AfcWriter::new();
     w.int32(point);
@@ -90,6 +91,13 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     conn.send(msg::GO_TO_LOCATION, w.finish()).await?;
     conn.log(&format!("   -> 158, 160 travel to base {base} location {location} point {point}"));
     Ok(Outcome::Answered)
+}
+
+/// The base the character is at; a new session starts on the starting base.
+pub(super) fn current_base(settings: &Settings, player: &Player) -> i32 {
+    base_of(&settings.bases, player.location)
+        .or((player.base != 0).then_some(player.base))
+        .unwrap_or(settings.character.start_base)
 }
 
 /// Which base a fishing location belongs to.
@@ -109,6 +117,7 @@ pub async fn return_to_base(session: &mut Session) -> Result<Outcome> {
 
     let base = base_of(&settings.bases, player.location).unwrap_or(settings.character.start_base);
     player.location = BASE_LOCATION;
+    player.base = base;
     send_base_details(conn, base).await?;
     conn.send(msg::LOAD_BASE, Vec::new()).await?;
     conn.log(&format!("   -> 150, 151 back to base {base}"));
