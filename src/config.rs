@@ -174,6 +174,47 @@ pub struct ShopSettings {
     pub prices: BTreeMap<i32, i64>,
 }
 
+/// `config/gathering.json`: what grows and lies at the gather points of each base.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatheringSettings {
+    pub respawn_minutes: [f64; 2],
+    pub start_filled_percent: f64,
+    pub resources: BTreeMap<i32, GatherResource>,
+    pub bases: BTreeMap<i32, GatherBase>,
+}
+
+/// One kind of thing on a point, numbered as the client's `restype_N` model.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatherResource {
+    pub name: String,
+    pub work_points: f32,
+    pub seconds: f32,
+    /// The Ремесло level a player guide names; skills are not modelled yet.
+    #[serde(default)]
+    pub skill_level: i32,
+    #[serde(default = "one")]
+    pub rolls: i32,
+    pub drops: Vec<GatherDrop>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GatherDrop {
+    pub item: i32,
+    pub weight: f64,
+    pub min: i32,
+    pub max: i32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct GatherBase {
+    /// Point type in the scene to the point ids of that type.
+    pub points: BTreeMap<i32, Vec<i32>>,
+    /// Point type to the resources that grow there, with weights.
+    pub spawns: BTreeMap<i32, BTreeMap<i32, f64>>,
+}
+
 /// Things that come up on the hook together with a fish.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -267,6 +308,9 @@ pub struct Settings {
     pub loot: LootSettings,
     pub travel: TravelSettings,
     pub bases: BTreeMap<i32, BaseSettings>,
+    /// From `config/gathering.json`; without that file nothing can be gathered.
+    #[serde(skip)]
+    pub gathering: GatheringSettings,
     pub starter_kit: Vec<StarterItem>,
 }
 
@@ -393,6 +437,10 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
     let mut settings: Settings = read_commented(&config_dir.join("settings.json"))?;
     if settings.shop.guide_stock {
         settings.shop.stock = read_commented(&config_dir.join("shops.json"))?;
+    }
+    let gathering = config_dir.join("gathering.json");
+    if gathering.exists() {
+        settings.gathering = read_commented(&gathering)?;
     }
     check_bite_behaviour(&settings.fishing.bite_behaviour)?;
     if !(1..=MAX_BAG_PAGES).contains(&settings.bags.pages) || settings.bags.cells_per_purchase < 1 {

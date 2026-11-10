@@ -4,6 +4,7 @@
 mod character;
 mod crafting;
 mod fishing;
+mod gathering;
 mod inventory;
 mod loot;
 mod keepnet;
@@ -13,7 +14,7 @@ mod shop;
 mod travel;
 mod vitals;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -86,6 +87,10 @@ pub struct Player {
     /// The base the character is at or fishing from; location 0 alone does not say.
     pub base: i32,
     pub bites_by_rod: HashMap<i32, Bite>,
+    /// Gather points as this client last heard of them; `None` after a scene change.
+    pub shown_points: Option<BTreeMap<i32, i32>>,
+    /// The base and point whose gathering bar is running.
+    pub harvesting: Option<(i32, i32)>,
     pub landed: HashMap<i64, CaughtFish>,
     pub last_tick: Instant,
     pub last_save: Instant,
@@ -100,6 +105,8 @@ impl Player {
             location: fishing::DEFAULT_LOCATION,
             base: 0,
             bites_by_rod: HashMap::new(),
+            shown_points: None,
+            harvesting: None,
             landed: HashMap::new(),
             last_tick: now,
             last_save: now,
@@ -182,6 +189,9 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         id @ (msg::CRAFT | msg::CRAFT_STATION) => crafting::station(session, message, id).await,
         msg::RECIPE_LEARN => crafting::learn(session, message).await,
         msg::CRAFT_MAKE => crafting::make(session, message).await,
+        msg::USER_STATE => gathering::show(session).await,
+        msg::HARVEST_START => gathering::start(session, message).await,
+        msg::HARVEST_FINISH => gathering::finish(session, message).await,
         msg::STORAGE => panels::storage(session).await,
         msg::BAG_PRICE => panels::bag_price(session, message).await,
         msg::BAG_BOUGHT => panels::buy_cells(session, message).await,

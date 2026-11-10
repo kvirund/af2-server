@@ -81,6 +81,7 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
 
     player.location = location;
     player.base = base;
+    player.shown_points = None;
 
     let mut w = AfcWriter::new();
     w.int32(point);
@@ -118,6 +119,7 @@ pub async fn return_to_base(session: &mut Session) -> Result<Outcome> {
     let base = base_of(&settings.bases, player.location).unwrap_or(settings.character.start_base);
     player.location = BASE_LOCATION;
     player.base = base;
+    player.shown_points = None;
     send_base_details(conn, base).await?;
     conn.send(msg::LOAD_BASE, Vec::new()).await?;
     conn.log(&format!("   -> 150, 151 back to base {base}"));

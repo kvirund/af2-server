@@ -1,10 +1,11 @@
 //! What every connection shares. A character's own state belongs to its
 //! connection's task, so game code needs no locks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use chrono::Local;
 use tokio::sync::Notify;
@@ -64,8 +65,18 @@ impl OnlineCharacters {
     }
 }
 
+/// A gather point of a base scene. Every player sees the same ones.
+pub struct GatherPoint {
+    pub kind: i32,
+    /// The client's `restype_N`, or 0 while the point is empty.
+    pub resource: i32,
+    pub respawn_at: Instant,
+}
+
 pub struct World {
     pub settings: Settings,
+    /// Base to its points, filled the first time anyone is at that base.
+    pub gather_points: Mutex<HashMap<i32, BTreeMap<i32, GatherPoint>>>,
     pub fish: FishTable,
     pub catalog: Catalog,
     pub recipes: Vec<Recipe>,
@@ -83,7 +94,16 @@ impl World {
         store: Box<dyn Storage>,
         log: Log,
     ) -> Self {
-        Self { settings, fish, catalog, recipes, store, log, online: OnlineCharacters::default() }
+        Self {
+            settings,
+            gather_points: Mutex::default(),
+            fish,
+            catalog,
+            recipes,
+            store,
+            log,
+            online: OnlineCharacters::default(),
+        }
     }
 
     /// Marks a character as played by this connection and disconnects anyone
