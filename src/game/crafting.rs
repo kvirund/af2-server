@@ -24,8 +24,6 @@ const FIRST_NON_INVENTORY_BAG: i32 = 50;
 const FISH_CARD: i32 = 1309;
 /// Species in a fish ingredient: any ordinary fish, or any mutant.
 const ANY_FISH: i32 = 0;
-/// Reached by 1700, which names the part of this station's list to show.
-const SHARED_STATION: i32 = 1000;
 const UNLIMITED: i32 = -1;
 const LEARNED: &str = "ok";
 const REFUSED: &str = "no_recept";
@@ -44,8 +42,10 @@ fn add_uses(known: &mut HashMap<i32, i32>, recipe: i32, uses: i32) {
     *total = if uses < 0 || *total < 0 { UNLIMITED } else { *total + uses };
 }
 
-fn at_station(recipe: &Recipe, request: i32, station: i32) -> bool {
-    if request == msg::CRAFT { recipe.station == SHARED_STATION && recipe.show == station } else { recipe.station == station }
+/// Both requests name the station whose recipes to list: 1701 from a workbench,
+/// 1700 from the cutting table (its addId) and from the collections button.
+fn at_station(recipe: &Recipe, station: i32) -> bool {
+    recipe.station == station
 }
 
 /// One entry of cases 1700 and 1701: int recipe, int station, int kind, result,
@@ -91,7 +91,7 @@ pub async fn station(session: &mut Session, message: &AfcMessage, id: i32) -> Re
     let mut w = AfcWriter::new();
     w.int32(station);
     let mut listed = 0;
-    for recipe in world.recipes.iter().filter(|recipe| at_station(recipe, id, station)).filter(drawable) {
+    for recipe in world.recipes.iter().filter(|recipe| at_station(recipe, station)).filter(drawable) {
         let uses = if recipe.default { Some(UNLIMITED) } else { player.data.known_recipes.get(&recipe.id).copied() };
         if let Some(uses) = uses {
             write_row(&mut w, recipe, station, uses);
@@ -146,15 +146,24 @@ struct Taken {
     fish: Vec<i64>,
 }
 
-fn fish_fits(fish: &CaughtFish, species: i32, min: i32, max: i32) -> bool {
-    let kind = if species == ANY_FISH { true } else { fish.species == species };
+/// Species in a fish ingredient that means any mutant, as the client checks it.
+const ANY_MUTANT: i32 = -1;
+
+/// The client's own test: 0 takes any fish but a mutant, -1 only a mutant.
+fn fish_fits(fish: &CaughtFish, species: i32, min: i32, max: i32, mutants: &[i32]) -> bool {
+    let mutant = mutants.contains(&fish.species);
+    let kind = match species {
+        ANY_FISH => !mutant,
+        ANY_MUTANT => mutant,
+        exact => fish.species == exact,
+    };
     kind && (min <= 0 || fish.grams >= min) && (max <= 0 || fish.grams <= max)
 }
 
 /// The items and fish a recipe would use, or `None` if something is missing.
-/// Fish go lightest first, so the big ones stay for other recipes. Mutants and
-/// the rarer conditions in the sixth number are not modelled and never match.
-fn ingredients_for(character: &CharacterData, recipe: &Recipe) -> Option<Taken> {
+/// Fish go lightest first, so the big ones stay for other recipes. The rarer
+/// conditions in the sixth number are not modelled and never match.
+fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) -> Option<Taken> {
     let mut taken = Taken::default();
     for ingredient in &recipe.ingredients {
         let (id, need) = (ingredient[0] as i32, ingredient[1].max(1.0) as i32);
@@ -179,13 +188,13 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe) -> Option<Taken> 
             }
         } else {
             let (min, max, other) = (ingredient[3] as i32, ingredient[4] as i32, ingredient[5] as i32);
-            if id < ANY_FISH || other != 0 {
+            if id < ANY_MUTANT || other != 0 {
                 return None;
             }
             let mut fitting: Vec<&CaughtFish> = character
                 .fish
                 .iter()
-                .filter(|fish| !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max))
+                .filter(|fish| !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max, mutants))
                 .collect();
             if fitting.len() < need as usize {
                 return None;
@@ -239,7 +248,7 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     if let Some(reason) = problem {
         return refuse(session, reason, recipe_id).await;
     }
-    let Some(taken) = ingredients_for(&player.data, recipe) else {
+    let Some(taken) = ingredients_for(&player.data, recipe, &world.settings.fishing.mutant_species) else {
         return refuse(session, "no_ingridients", recipe_id).await;
     };
     let Some(item) = world.catalog.get(template) else {
@@ -320,11 +329,11 @@ mod tests {
             ..Default::default()
         };
         let recipe = needing(vec![[0.0, 2.0, 1.0, 451.0, 1000.0, 0.0]]);
-        assert_eq!(ingredients_for(&character, &recipe).unwrap().fish, vec![2, 4]);
+        assert_eq!(ingredients_for(&character, &recipe, &[]).unwrap().fish, vec![2, 4]);
         let one_species = needing(vec![[5.0, 2.0, 1.0, 0.0, 0.0, 0.0]]);
-        assert_eq!(ingredients_for(&character, &one_species).unwrap().fish, vec![3, 4]);
+        assert_eq!(ingredients_for(&character, &one_species, &[]).unwrap().fish, vec![3, 4]);
         let too_many = needing(vec![[0.0, 3.0, 1.0, 451.0, 1000.0, 0.0]]);
-        assert_eq!(ingredients_for(&character, &too_many), None);
+        assert_eq!(ingredients_for(&character, &too_many, &[]), None);
     }
 
     #[test]
@@ -334,15 +343,19 @@ mod tests {
             ..Default::default()
         };
         let recipe = needing(vec![[1148.0, 5.0, 0.0, 0.0, 0.0, 0.0]]);
-        assert_eq!(ingredients_for(&character, &recipe).unwrap().items, vec![(1, 3), (2, 2)]);
+        assert_eq!(ingredients_for(&character, &recipe, &[]).unwrap().items, vec![(1, 3), (2, 2)]);
         let more = needing(vec![[1148.0, 8.0, 0.0, 0.0, 0.0, 0.0]]);
-        assert_eq!(ingredients_for(&character, &more), None);
+        assert_eq!(ingredients_for(&character, &more, &[]), None);
     }
 
     #[test]
-    fn mutants_are_never_found() {
-        let character = CharacterData { fish: vec![fish(1, 5, 2000)], ..Default::default() };
-        assert_eq!(ingredients_for(&character, &needing(vec![[-1.0, 1.0, 1.0, 100.0, 15000.0, 0.0]])), None);
+    fn mutants_go_only_where_a_mutant_is_asked_for() {
+        let character = CharacterData { fish: vec![fish(1, 5, 2000), fish(2, 339, 900)], ..Default::default() };
+        let mutant = needing(vec![[-1.0, 1.0, 1.0, 100.0, 15000.0, 0.0]]);
+        assert_eq!(ingredients_for(&character, &mutant, &[339]).unwrap().fish, vec![2]);
+        let any = needing(vec![[0.0, 1.0, 1.0, 100.0, 3000.0, 0.0]]);
+        assert_eq!(ingredients_for(&character, &any, &[339]).unwrap().fish, vec![1]);
+        assert_eq!(ingredients_for(&character, &mutant, &[]), None);
     }
 
     fn recipe(station: i32, show: i32) -> Recipe {
@@ -382,12 +395,14 @@ mod tests {
         assert_eq!(known[&1], UNLIMITED);
     }
 
+    /// The collections window, opened from the bottom panel with 1700.
+    const COLLECTIONS: i32 = 1000;
+
     #[test]
-    fn each_request_reads_its_own_list() {
-        assert!(at_station(&recipe(3, 0), msg::CRAFT_STATION, 3));
-        assert!(!at_station(&recipe(3, 0), msg::CRAFT, 3));
-        assert!(at_station(&recipe(SHARED_STATION, 3), msg::CRAFT, 3));
-        assert!(!at_station(&recipe(SHARED_STATION, 5), msg::CRAFT, 3));
+    fn the_cutting_table_lists_its_own_recipes_not_the_collections() {
+        assert!(at_station(&recipe(3, 0), 3));
+        assert!(!at_station(&recipe(COLLECTIONS, 3), 3));
+        assert!(at_station(&recipe(COLLECTIONS, 3), COLLECTIONS));
     }
 
     #[test]

@@ -176,8 +176,8 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::FISH_TO_SPARE | msg::FISH_TO_IN_USE => keepnet::move_between_lists(session, message).await,
         msg::FISH_RELEASE => keepnet::release(session, message).await,
         msg::FISH_SWAP_KEEPNETS => keepnet::swap_keepnets(session).await,
-        // The original server decided what each NPC offered, and the buyer is
-        // not told apart in the client, so every NPC buys fish for now.
+        // Only the NPCs listed in fishMarket.buyers trade fish; the others'
+        // windows are still to do.
         msg::NPC_TALK => keepnet::open_market(session, message).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,
         id @ (msg::STATISTICS | msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {

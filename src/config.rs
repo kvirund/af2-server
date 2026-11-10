@@ -35,6 +35,9 @@ pub struct CharacterSettings {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FishingSettings {
+    /// Species the client draws as mutants (`isMutant` in its fishModelData).
+    #[serde(default)]
+    pub mutant_species: Vec<i32>,
     pub bite_chance: f64,
     pub bite_behaviour: String,
     pub small_fish_nibble_share: f64,
@@ -93,6 +96,9 @@ pub struct FishMarketSettings {
     pub base_price_per_kg: f64,
     pub large_price_factor: f64,
     pub trophy_price_factor: f64,
+    /// Base to the NPC numbers there that buy fish; NPC numbers repeat between bases.
+    #[serde(default)]
+    pub buyers: BTreeMap<i32, Vec<i32>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -407,7 +413,8 @@ impl Catalog {
 pub struct Recipe {
     pub id: i32,
     pub station: i32,
-    /// Which list of the shared station shows it.
+    /// `showid` of the recipe; for collections it looks like the base. Not used yet.
+    #[allow(dead_code)]
     pub show: i32,
     pub category: i32,
     pub kind: i32,

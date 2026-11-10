@@ -114,6 +114,15 @@ SteamID через Steam OpenID и выдаёт PIN, а сервер прове�
 `AFCGame.exe` Steamworks не поднимается (`SteamAPI_Init() failed`), и игра
 требует запустить клиент Steam.
 
+**Что можно добыть** — `tools/reachability.py` проверяет, какие предметы игрок может
+получить на этом сервере (магазины, стартовый набор, улов, сбор, рецепты с доступными
+рецептами и ингредиентами), и для остальных пишет причину. Нужны `data/items.json` и
+`data/recipes.json`, которые делает лаунчер:
+
+```bash
+python tools/reachability.py "C:/Program Files (x86)/Steam/steamapps/common/AF2" data/reachability.md
+```
+
 **Нажатия в окне игры** — `tools/ui.ps1` (скриншот и клик через user32):
 
 ```bash

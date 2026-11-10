@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use chrono::{Local, TimeDelta};
 
-use super::{Conn, Outcome, Player, Session, active, inventory};
+use super::{Conn, Outcome, Player, Session, active, inventory, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
@@ -24,10 +24,11 @@ const LARGE_CLASS: i32 = 1;
 const FULL_DEMAND: f32 = 1.0;
 
 /// The record `OIJEGJLCFCF.LIMJEKJAILL` reads, shared by cases 175 and 1130.
-pub fn write_fish(w: &mut AfcWriter, fish: &CaughtFish) {
+/// The third flag marks the species as a mutant; recipes check it.
+pub fn write_fish(w: &mut AfcWriter, fish: &CaughtFish, mutants: &[i32]) {
     w.int64(fish.id).int32(fish.species).int32(fish.grams);
     w.int32(fish.size_class).int32(fish.bait).int32(fish.list);
-    w.boolean(false).boolean(fish.size_class == TROPHY_CLASS).boolean(false);
+    w.boolean(false).boolean(fish.size_class == TROPHY_CLASS).boolean(mutants.contains(&fish.species));
     w.string("").string("");
 }
 
@@ -36,7 +37,7 @@ pub async fn send_all(conn: &Conn, player: &Player) -> Result<()> {
     conn.send(msg::FISH_LIST_CLEAR, Vec::new()).await?;
     let mut w = AfcWriter::new();
     for fish in &player.data.fish {
-        write_fish(&mut w, fish);
+        write_fish(&mut w, fish, &conn.world.settings.fishing.mutant_species);
     }
     conn.send(msg::FISH_LIST, w.finish()).await
 }
@@ -145,6 +146,12 @@ pub async fn open_market(session: &mut Session, message: &AfcMessage) -> Result<
     let player = active(&mut session.player)?;
     let conn = &session.conn;
     let world = &conn.world;
+    let base = travel::current_base(&world.settings, player);
+    let buys = world.settings.fish_market.buyers.get(&base).is_some_and(|npcs| npcs.contains(&shop));
+    if !buys {
+        conn.log(&format!("   NPC {shop} at base {base} does not buy fish; its own window is not made yet"));
+        return Ok(Outcome::Unanswered);
+    }
 
     let mut lots: BTreeMap<(i32, i32), (i32, i32)> = BTreeMap::new();
     for fish in player.data.fish.iter().filter(|fish| fish.list == IN_USE_LIST) {
@@ -241,7 +248,7 @@ mod tests {
     use super::*;
 
     fn market() -> FishMarketSettings {
-        FishMarketSettings { base_price_per_kg: 100.0, large_price_factor: 1.5, trophy_price_factor: 3.0 }
+        FishMarketSettings { base_price_per_kg: 100.0, large_price_factor: 1.5, trophy_price_factor: 3.0, buyers: Default::default() }
     }
 
     fn species(share: f64) -> Species {

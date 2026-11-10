@@ -241,7 +241,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
 
     let mut w = AfcWriter::new();
     w.int32(rod);
-    keepnet::write_fish(&mut w, &fish);
+    keepnet::write_fish(&mut w, &fish, &conn.world.settings.fishing.mutant_species);
     w.int32(shown).int32(0).single(0.0);
     conn.send(msg::FISH_LANDED, w.finish()).await?;
 
@@ -293,6 +293,7 @@ mod tests {
 
     fn settings() -> FishingSettings {
         FishingSettings {
+            mutant_species: vec![],
             bite_chance: 1.0,
             bite_behaviour: String::new(),
             small_fish_nibble_share: 0.0,
