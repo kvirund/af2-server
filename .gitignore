@@ -1,7 +1,9 @@
 # Build output
 target/
-bin/
-obj/
+/bin/
+/obj/
+tests/*/bin/
+tests/*/obj/
 
 # Generated from your own copy of the game; never published
 data/
@@ -13,3 +15,4 @@ data/
 trace.log
 backup/
 legacy-csharp/
+guides/
