@@ -2,9 +2,9 @@
 //! guide; how often is set in `config/settings.json`.
 
 use anyhow::Result;
-use rand::random;
+use rand::{random, random_range};
 
-use super::{Conn, Player, inventory, travel};
+use super::{Conn, Player, character, inventory, travel};
 use crate::afc::AfcWriter;
 use crate::config::LootItem;
 use crate::messages as msg;
@@ -41,6 +41,15 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
         && happens(loot.base_card_chance_percent)
     {
         found.push((*card, 1));
+    }
+
+    if happens(loot.premium_chance_percent) {
+        let [least, most] = loot.premium;
+        let amount = random_range(least.min(most)..=most.max(least));
+        player.data.premium += amount;
+        conn.save(player).await?;
+        character::send_money(conn, player, 0).await?;
+        conn.log(&format!("   -> 21 premium +{amount}, now {}", player.data.premium));
     }
 
     for (template, count) in found {

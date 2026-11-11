@@ -197,7 +197,10 @@ pub struct GatherResource {
     pub name: String,
     pub work_points: f32,
     pub seconds: f32,
-    /// The Ремесло level a player guide names; skills are not modelled yet.
+    /// The skill (Ремесло, Грибник) and its level a player guide names;
+    /// skills are not modelled yet.
+    #[serde(default)]
+    pub skill: String,
     #[serde(default)]
     pub skill_level: i32,
     #[serde(default = "one")]
@@ -230,6 +233,15 @@ pub struct LootSettings {
     pub base_card_chance_percent: f64,
     /// Base id to the card of that base.
     pub base_cards: BTreeMap<i32, i32>,
+    /// Premium currency on the hook: chance per fish and how much, least and most.
+    #[serde(default)]
+    pub premium_chance_percent: f64,
+    #[serde(default = "one_each")]
+    pub premium: [i64; 2],
+}
+
+fn one_each() -> [i64; 2] {
+    [1, 1]
 }
 
 #[derive(Debug, Deserialize)]

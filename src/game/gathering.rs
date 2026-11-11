@@ -155,7 +155,7 @@ pub async fn start(session: &mut Session, message: &AfcMessage) -> Result<Outcom
         return reply(conn, msg::HARVEST_START, "nowp=0").await;
     }
     if info.skill_level > 0 {
-        conn.log(&format!("   {} needs Ремесло {}; skills are not modelled, so it is allowed", info.name, info.skill_level));
+        conn.log(&format!("   {} needs {} {}; skills are not modelled, so it is allowed", info.name, info.skill, info.skill_level));
     }
     player.harvesting = Some((base, point));
     reply(conn, msg::HARVEST_START, &format!("ok={}", info.seconds)).await
@@ -294,6 +294,7 @@ mod tests {
             name: String::new(),
             work_points: 1.0,
             seconds: 1.0,
+            skill: String::new(),
             skill_level: 0,
             rolls: 3,
             drops: vec![drop(1, 1.0, 2, 4), drop(2, 1.0, 1, 1)],
