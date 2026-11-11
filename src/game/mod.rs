@@ -10,6 +10,7 @@ mod loot;
 mod keepnet;
 mod panels;
 mod perks;
+mod refining;
 mod shop;
 mod travel;
 mod vitals;
@@ -192,6 +193,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::USER_STATE => gathering::show(session).await,
         msg::HARVEST_START => gathering::start(session, message).await,
         msg::HARVEST_FINISH => gathering::finish(session, message).await,
+        msg::REFINE => refining::refine(session, message).await,
         msg::STORAGE => panels::storage(session).await,
         msg::BAG_PRICE => panels::bag_price(session, message).await,
         msg::BAG_BOUGHT => panels::buy_cells(session, message).await,

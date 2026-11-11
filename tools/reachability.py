@@ -6,8 +6,9 @@ data/recipes.json. The game folder is the one with AFCGame_Data in it.
 
 An item counts as obtainable when a shop of some base sells it (config/shops.json),
 it is in the starter kit, it comes up with fish or from a gather point
-(config/settings.json "loot", config/gathering.json), or a recipe the server can
-make produces it from obtainable things. A recipe is usable when it is known from
+(config/settings.json "loot", config/gathering.json), an obtainable item refines
+into it (`<refine>` in the item's description), or a recipe the server can make
+produces it from obtainable things. A recipe is usable when it is known from
 the start or its recipe item is obtainable. Items whose name or hint says they
 are a test are listed apart.
 """
@@ -110,11 +111,20 @@ for i, item in items.items():
         if len(par) >= 2 and par[0] in ("3", "7"):
             teaches.setdefault(int(par[1]), []).append(i)
 
+refines = {i: [int(part.split("/")[0]) for part in tag(item, "refine").split(",") if part.strip()]
+           for i, item in items.items() if tag(item, "refine").strip()}
+
 reach = set(sources)
 usable = set()
 changed = True
 while changed:
     changed = False
+    for i, made in refines.items():
+        if i in reach:
+            for m in made:
+                if m not in reach:
+                    reach.add(m); changed = True
+                    sources[m].add(f"переработка {i}")
     for r in recipes:
         rid = r["id"]
         known = r["default"] or any(t in reach for t in teaches.get(rid, []))

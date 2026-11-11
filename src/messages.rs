@@ -64,6 +64,7 @@ pub const HEARTBEAT: i32 = 255;
 pub const ACTIVE_ICONS: i32 = 260;
 pub const FISH_SWAP_KEEPNETS: i32 = 285;
 pub const FISH_RELEASE: i32 = 286;
+pub const REFINE: i32 = 290;
 pub const BITE: i32 = 1120;
 pub const FISH_LANDED: i32 = 1130;
 pub const FISH_KEPT: i32 = 1135;
