@@ -90,7 +90,14 @@ pub async fn refine(session: &mut Session, message: &AfcMessage) -> Result<Outco
     inventory::send_updates(conn, player.data.id, &changed).await?;
     vitals::send(conn, player).await?;
     conn.log(&format!("   refined {template} (item {id})"));
-    if got.is_empty() { reply(conn, "noresult").await } else { reply(conn, &format!("result={}", got.join(","))).await }
+    let status = if got.is_empty() { "noresult".to_owned() } else { format!("result={}", got.join(",")) };
+    let outcome = reply(conn, &status).await?;
+    // After either reply the client opens the next bar on its own, even for the
+    // last piece. Closing that window at once keeps it from running for nothing.
+    if !player.data.items.iter().any(|item| item.id == id) {
+        reply(conn, "isend").await?;
+    }
+    Ok(outcome)
 }
 
 #[cfg(test)]
