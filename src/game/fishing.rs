@@ -208,6 +208,14 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     vitals::keep_busy(player);
 
     let bait = player.data.items.iter().find(|item| item.id == bait_id).map(|item| item.template);
+    if bait.is_none() {
+        // The client keeps the last piece on the rod after the server used it up.
+        conn.log(&format!("   no bait: item {bait_id} is gone"));
+        let mut w = AfcWriter::new();
+        w.boolean(false).single(0.0);
+        conn.send(msg::BITE, w.finish()).await?;
+        return Ok(Outcome::Answered);
+    }
     let min_grams = if random::<f64>() < settings.small_fish_nibble_share {
         0.0
     } else {
