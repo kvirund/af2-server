@@ -6,7 +6,7 @@ use rand::random;
 
 use std::collections::HashMap;
 
-use super::{Outcome, Session, active, character, inventory, vitals};
+use super::{Outcome, Session, active, character, inventory, perks, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::Recipe;
 use crate::messages as msg;
@@ -25,6 +25,10 @@ const FISH_CARD: i32 = 1309;
 /// Species in a fish ingredient: any ordinary fish, or any mutant.
 const ANY_FISH: i32 = 0;
 const UNLIMITED: i32 = -1;
+/// «Ремесло» adds its `val` per level to the critical chance in points,
+/// «Опыт ремесла» takes its `val` per level in percent off the work points.
+const CRAFT: i32 = 130;
+const CRAFT_EXPERIENCE: i32 = 132;
 const LEARNED: &str = "ok";
 const REFUSED: &str = "no_recept";
 
@@ -230,9 +234,14 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let player = active(&mut session.player)?;
     let uses = if recipe.default { UNLIMITED } else { player.data.known_recipes.get(&recipe.id).copied().unwrap_or(0) };
     let money = recipe.cost[0] as i64;
-    let work = recipe.cost[2] as f32;
+    let skill = |perk: i32| {
+        let per_level = world.settings.skill_tree.get(perk).map_or(0.0, |node| node.effect[0]);
+        per_level * f64::from(perks::level_of(&session.conn, player, perk))
+    };
+    let work = (f64::from(recipe.cost[2] as f32) * (1.0 - skill(CRAFT_EXPERIENCE) / 100.0)).max(0.0) as f32;
+    let crit_chance = recipe.crit_chance + skill(CRAFT);
     let points = player.data.vitals.as_ref().map_or(0.0, |vitals| vitals.work_points);
-    let critical = recipe.crit_result[0] > 0.0 && random::<f64>() * 100.0 < recipe.crit_chance;
+    let critical = recipe.crit_result[0] > 0.0 && random::<f64>() * 100.0 < crit_chance;
     let made = if critical { recipe.crit_result } else { recipe.result };
     let (template, count) = (made[0] as i32, made[1].max(1.0) as i32);
 

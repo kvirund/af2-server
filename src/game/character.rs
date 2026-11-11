@@ -185,7 +185,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     // along and left water with a maximum of 0: an empty bar that never filled.
     w.int32(0);
     let current = character.vitals.clone().unwrap_or_else(|| vitals::full(progression, character.level));
-    let maxima = vitals::for_client(vitals::maxima(progression, character.level));
+    let maxima = vitals::for_client(vitals::limits(settings, &conn.world.catalog, character));
     for (max, value) in maxima.iter().zip(vitals::for_client(current.values)) {
         w.single(value).int32(*max as i32);
     }

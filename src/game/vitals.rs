@@ -4,11 +4,13 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, fishing, inventory, travel};
+use std::collections::BTreeMap;
+
+use super::{Conn, Outcome, Player, Session, active, fishing, inventory, perks, travel};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{ProgressionSettings, VitalsSettings};
+use crate::config::{ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
-use crate::storage::Vitals;
+use crate::storage::{CharacterData, Vitals};
 
 const COUNT: usize = 5;
 const LIFE: usize = 0;
@@ -36,6 +38,32 @@ pub fn maxima(progression: &ProgressionSettings, level: i32) -> [f32; COUNT] {
         *max += ((level - 1) * per_level) as f32;
     }
     maxima
+}
+
+/// Skills that raise scales: Атлетика food, life and stamina, Сталкер radiation
+/// resistance and water, each by its `val` per level.
+const SCALE_SKILLS: [(i32, &[usize]); 2] = [(110, &[FOOD, LIFE, STAMINA]), (140, &[RADIATION, WATER])];
+
+fn skill_bonus(settings: &Settings, levels: &BTreeMap<i32, i32>) -> [f32; COUNT] {
+    let mut bonus = [0.0; COUNT];
+    for (perk, scales) in SCALE_SKILLS {
+        let per_level = settings.skill_tree.get(perk).map_or(0.0, |node| node.effect[0]);
+        let gain = per_level * f64::from(levels.get(&perk).copied().unwrap_or(0));
+        for scale in scales {
+            bonus[*scale] += gain as f32;
+        }
+    }
+    bonus
+}
+
+/// The character's maxima with what skills and gear add.
+pub fn limits(settings: &Settings, catalog: &crate::config::Catalog, character: &CharacterData) -> [f32; COUNT] {
+    let bonus = skill_bonus(settings, &perks::levels(settings, catalog, character));
+    let mut limits = maxima(&settings.progression, character.level);
+    for (max, extra) in limits.iter_mut().zip(bonus) {
+        *max += extra;
+    }
+    limits
 }
 
 pub fn full(progression: &ProgressionSettings, level: i32) -> Vitals {
@@ -108,7 +136,7 @@ pub async fn tick(session: &mut Session) -> Result<()> {
         radiation: background(conn, player.location),
         resting: player.last_active.elapsed().as_secs_f32() >= settings.vitals.rest_after_seconds,
     };
-    let limits = maxima(&settings.progression, player.data.level);
+    let limits = limits(settings, &conn.world.catalog, &player.data);
     if let Some(vitals) = player.data.vitals.as_mut() {
         advance(&settings.vitals, &limits, vitals, &passing);
     }
@@ -182,7 +210,7 @@ pub async fn use_item(session: &mut Session, message: &AfcMessage) -> Result<Out
         return Ok(Outcome::Unanswered);
     };
 
-    let limits = maxima(&settings.progression, player.data.level);
+    let limits = limits(settings, &conn.world.catalog, &player.data);
     if let Some(vitals) = player.data.vitals.as_mut() {
         for (target, change) in changes {
             vitals.values[target] += change;

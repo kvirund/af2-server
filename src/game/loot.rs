@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rand::{random, random_range};
 
-use super::{Conn, Player, character, inventory, travel};
+use super::{Conn, Player, character, inventory, perks, travel};
 use crate::afc::AfcWriter;
 use crate::config::LootItem;
 use crate::messages as msg;
@@ -21,6 +21,8 @@ fn pick(items: &[LootItem], roll: f64) -> Option<&LootItem> {
     None
 }
 
+const CRAFTSMANS_EYE: i32 = 131;
+
 fn happens(percent: f64) -> bool {
     random::<f64>() * 100.0 < percent
 }
@@ -31,7 +33,10 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
     let settings = &conn.world.settings;
     let loot = &settings.loot;
     let mut found = Vec::new();
-    if happens(loot.chance_percent)
+    // «Глаз ремесленника»: its `val` per level, in percent of the chance.
+    let eye = settings.skill_tree.get(CRAFTSMANS_EYE).map_or(0.0, |node| node.effect[0]);
+    let chance = loot.chance_percent * (1.0 + eye * f64::from(perks::level_of(conn, player, CRAFTSMANS_EYE)) / 100.0);
+    if happens(chance)
         && let Some(item) = pick(&loot.items, random())
     {
         found.push((item.item, item.count.max(1)));
