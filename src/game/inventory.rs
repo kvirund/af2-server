@@ -83,6 +83,22 @@ pub fn move_old_backpack(
     moved
 }
 
+/// Puts an item in a cell. Whatever lay there takes the item's old place, so
+/// two things never share a cell. The moved items, the asked one first.
+fn put_in_cell(character: &mut CharacterData, id: i64, bag: i32, cell: i32) -> Option<Vec<ItemEntry>> {
+    let from = character.items.iter().position(|item| item.id == id)?;
+    let old = (character.items[from].bag, character.items[from].cell);
+    (character.items[from].bag, character.items[from].cell) = (bag, cell);
+    let mut moved = vec![character.items[from].clone()];
+    if old != (bag, cell) {
+        for item in character.items.iter_mut().filter(|item| item.id != id && (item.bag, item.cell) == (bag, cell)) {
+            (item.bag, item.cell) = old;
+            moved.push(item.clone());
+        }
+    }
+    Some(moved)
+}
+
 /// Client: long item, int bag, int cell. Bag -1 means any free cell.
 pub async fn move_item(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
     let mut r = message.reader();
@@ -105,20 +121,19 @@ pub async fn move_item(session: &mut Session, message: &AfcMessage) -> Result<Ou
         (bag, cell) = free;
     }
 
-    let Some(item) = player.data.items.iter_mut().find(|item| item.id == id) else {
+    let Some(old_bag) = player.data.items.iter().find(|item| item.id == id).map(|item| item.bag) else {
         conn.log(&format!("   move: character has no item {id}"));
         return Ok(Outcome::Unanswered);
     };
+    let moved = put_in_cell(&mut player.data, id, bag, cell).unwrap_or_default();
     let gear_changed = {
         let bags = &conn.world.settings.bags;
-        bags.holds_gear(item.bag) || bags.holds_gear(bag)
+        bags.holds_gear(old_bag) || bags.holds_gear(bag)
     };
-    (item.bag, item.cell) = (bag, cell);
-    let moved = item.clone();
 
     conn.save(player).await?;
-    send_updates(conn, player.data.id, &[moved]).await?;
-    conn.log(&format!("   -> 181 item {id} now at {bag}/{cell}"));
+    send_updates(conn, player.data.id, &moved).await?;
+    conn.log(&format!("   -> 181 item {id} now at {bag}/{cell}{}", if moved.len() > 1 { ", the one there moved to its place" } else { "" }));
     if gear_changed {
         character::send_update(conn, player).await?;
         perks::send(conn, player).await?;
@@ -662,5 +677,13 @@ mod tests {
         let mut character = CharacterData { items: vec![held(1, 0, 9), held(2, 5, 9)], ..Default::default() };
         swap(&mut character, 1, 2).unwrap();
         assert_eq!((character.items[0].cell, character.items[1].cell), (5, 0));
+    }
+
+    #[test]
+    fn moving_onto_an_occupied_cell_trades_places() {
+        let mut character = CharacterData { items: vec![held(1, 0, 1001), held(2, 1, 1287)], ..Default::default() };
+        let moved = put_in_cell(&mut character, 2, 1, 0).unwrap();
+        assert_eq!(moved.iter().map(|item| (item.id, item.cell)).collect::<Vec<_>>(), vec![(2, 0), (1, 1)]);
+        assert_eq!(put_in_cell(&mut character, 1, 1, 5).unwrap().len(), 1);
     }
 }

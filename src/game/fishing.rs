@@ -12,9 +12,9 @@ use rand::random;
 
 use super::{Bite, Outcome, Session, active, character, keepnet, inventory, loot, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{FishTable, FishingSettings, ProgressionSettings, Species};
+use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
-use crate::storage::{CaughtFish, UNKNOWN_BAIT};
+use crate::storage::{CaughtFish, ItemEntry, UNKNOWN_BAIT};
 
 pub const DEFAULT_LOCATION: i32 = 4;
 
@@ -27,6 +27,8 @@ const DEPTH_OFFSET: usize = 4 + 24 + 24;
 /// item's `basePar`. The client dips the float once for anything lighter, with
 /// no bite to set the hook on. Other classes have no minimum.
 const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
+/// Cells of a rod's bag holding the rod, reel and line.
+const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
 const NIGHT_START_HOUR: f64 = 21.5;
 const NIGHT_END_HOUR: f64 = 4.5;
 
@@ -40,6 +42,8 @@ pub(super) fn is_night(settings: &FishingSettings) -> bool {
 struct Conditions {
     bait: Option<i32>,
     min_grams: f64,
+    /// What the tackle holds; infinite without a limit.
+    max_grams: f64,
     depth: f64,
     bottom: f64,
     night: bool,
@@ -62,6 +66,9 @@ fn candidates<'a>(
                 return None;
             }
             if f64::from(species.large_grams) < conditions.min_grams {
+                return None;
+            }
+            if f64::from(species.small_grams) > conditions.max_grams {
                 return None;
             }
             if conditions.depth < f64::from(species.min_depth_cm) {
@@ -101,6 +108,55 @@ fn pick<'a>(candidates: &[(&'a Species, f64)], total: f64, mut roll: f64) -> &'a
 
 fn lerp(from: f64, to: f64, t: f64) -> i32 {
     (from + (to - from) * t).round() as i32
+}
+
+/// The first number of an item's `basePar`: the test of a rod, reel or line, in kg.
+fn test_kg(xml: &str) -> Option<f64> {
+    xml.split_once("<basePar>")?.1.split(['/', '<']).next()?.trim().parse().ok()
+}
+
+/// The heaviest fish the rod's tackle holds: the weakest of its rod, reel and
+/// line tests times the factor. The bait tells which rod's bag to look in.
+fn tackle_limit(catalog: &Catalog, items: &[ItemEntry], bait_item: i64, factor: f64) -> f64 {
+    let Some(bag) = items.iter().find(|item| item.id == bait_item).map(|item| item.bag) else {
+        return f64::INFINITY;
+    };
+    if factor <= 0.0 {
+        return f64::INFINITY;
+    }
+    let mut weakest = f64::INFINITY;
+    for cell in TACKLE_CELLS {
+        let strongest = items
+            .iter()
+            .filter(|item| item.bag == bag && item.cell == cell)
+            .filter_map(|item| catalog.get(item.template).and_then(|found| test_kg(&found.xml)))
+            .filter(|test| *test > 0.0)
+            .fold(None, |best: Option<f64>, test| Some(best.map_or(test, |best| best.max(test))));
+        if let Some(test) = strongest {
+            weakest = weakest.min(test);
+        }
+    }
+    weakest * factor * 1000.0
+}
+
+fn size_class(species: &Species, grams: i32) -> i32 {
+    if grams >= species.trophy_grams {
+        TROPHY_CLASS
+    } else if grams >= species.large_grams {
+        LARGE_CLASS
+    } else {
+        0
+    }
+}
+
+/// A fish too heavy for the tackle comes up again within what the tackle holds.
+fn fit_to_tackle(species: &Species, rolled: (i32, i32), min_grams: f64, max_grams: f64, point: f64) -> (i32, i32) {
+    if f64::from(rolled.0) <= max_grams {
+        return rolled;
+    }
+    let lightest = f64::from(species.small_grams).max(min_grams).min(max_grams);
+    let grams = lerp(lightest, max_grams, point);
+    (grams, size_class(species, grams))
 }
 
 fn bait_min_grams(xml: &str) -> f64 {
@@ -157,7 +213,8 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     } else {
         bait.and_then(|template| world.catalog.get(template)).map_or(0.0, |item| bait_min_grams(&item.xml))
     };
-    let conditions = Conditions { bait, min_grams, depth, bottom, night: is_night(settings) };
+    let max_grams = tackle_limit(&world.catalog, &player.data.items, bait_id, settings.tackle_weight_factor);
+    let conditions = Conditions { bait, min_grams, max_grams, depth, bottom, night: is_night(settings) };
     let options = candidates(&world.fish, settings, player.location, &conditions);
     let total: f64 = options.iter().map(|(_, weight)| weight).sum();
     let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
@@ -171,7 +228,8 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 
     let species = pick(&options, total, random());
     let luck = perks::effects(conn, player).trophy;
-    let (grams, size_class) = roll_weight(settings, species, depth, min_grams, luck, random(), random());
+    let rolled = roll_weight(settings, species, depth, min_grams, luck, random(), random());
+    let (grams, size_class) = fit_to_tackle(species, rolled, min_grams, max_grams, random());
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
 
     let small = f64::from(species.small_grams);
@@ -317,6 +375,7 @@ mod tests {
             min_stamina: 8.0,
             max_stamina: 60.0,
             hardy_stamina_factor: 1.4,
+            tackle_weight_factor: 1.5,
         }
     }
 
@@ -379,7 +438,7 @@ mod tests {
     #[test]
     fn a_big_bait_skips_fish_too_small_for_it() {
         let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = |min_grams| Conditions { bait: Some(1010), min_grams, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = |min_grams| Conditions { bait: Some(1010), min_grams, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
         assert_eq!(candidates(&table, &settings(), 4, &conditions(1000.0)).len(), 1);
         assert!(candidates(&table, &settings(), 4, &conditions(1001.0)).is_empty());
     }
@@ -393,9 +452,52 @@ mod tests {
     #[test]
     fn wrong_bait_gets_no_bite() {
         let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = Conditions { bait: Some(7), min_grams: 0.0, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(7), min_grams: 0.0, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
         assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
-        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
         assert_eq!(candidates(&table, &settings(), 4, &conditions).len(), 1);
+    }
+
+    fn gear(id: i32, test: &str) -> crate::config::CatalogItem {
+        crate::config::CatalogItem {
+            id,
+            kind: 1,
+            cost: 0,
+            durability: 1.0,
+            stacks: false,
+            shop_count: 1,
+            max_count: 1,
+            xml: format!("<basePar>{test}</basePar>"),
+        }
+    }
+
+    fn held(id: i64, bag: i32, cell: i32, template: i32) -> ItemEntry {
+        ItemEntry { id, bag, cell, count: 1, durability: 1.0, template }
+    }
+
+    #[test]
+    fn the_weakest_part_of_the_tackle_limits_the_fish() {
+        let catalog = Catalog::new(vec![gear(1, "1.5/2.2/150"), gear(2, "1/0/1"), gear(3, "2/0.15/30"), gear(4, "100/1/0"), gear(5, "6/0/5")]);
+        let mut items = vec![held(10, 100, 1, 1), held(11, 100, 2, 2), held(12, 100, 3, 3), held(13, 100, 20, 4)];
+        assert_eq!(tackle_limit(&catalog, &items, 13, 1.5), 1500.0);
+        assert_eq!(tackle_limit(&catalog, &items, 13, 0.0), f64::INFINITY);
+        assert_eq!(tackle_limit(&catalog, &items, 99, 1.5), f64::INFINITY);
+        items[1].template = 5;
+        assert_eq!(tackle_limit(&catalog, &items, 13, 1.5), 2250.0);
+    }
+
+    #[test]
+    fn a_fish_too_heavy_for_the_tackle_comes_up_lighter() {
+        let species = species();
+        assert_eq!(fit_to_tackle(&species, (800, 0), 0.0, 1500.0, 0.5), (800, 0));
+        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 0.0, 1500.0, 1.0), (1500, LARGE_CLASS));
+        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 0.0, 1500.0, 0.0), (100, 0));
+    }
+
+    #[test]
+    fn species_too_heavy_for_the_tackle_do_not_bite() {
+        let table = FishTable::for_tests(vec![species()], 4);
+        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, max_grams: 50.0, depth: 50.0, bottom: 100.0, night: false };
+        assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
     }
 }

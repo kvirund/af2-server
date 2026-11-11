@@ -61,6 +61,9 @@ pub struct FishingSettings {
     pub min_stamina: f64,
     pub max_stamina: f64,
     pub hardy_stamina_factor: f64,
+    /// The heaviest fish that bites, as a multiple of the weakest test of the
+    /// rod, reel and line; 0 for no limit.
+    pub tackle_weight_factor: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -480,6 +483,11 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    pub fn new(items: Vec<CatalogItem>) -> Self {
+        let index = items.iter().enumerate().map(|(position, item)| (item.id, position)).collect();
+        Self { items, index }
+    }
+
     pub fn get(&self, id: i32) -> Option<&CatalogItem> {
         self.index.get(&id).map(|&position| &self.items[position])
     }
@@ -549,8 +557,7 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
         serde_json::from_str(&text).with_context(|| items_path.display().to_string())?;
     items.iter_mut().for_each(|item| settings.shop.adjust(item));
 
-    let index = items.iter().enumerate().map(|(position, item)| (item.id, position)).collect();
-    let catalog = Catalog { items, index };
+    let catalog = Catalog::new(items);
 
     let recipes_path = root.join("data").join("recipes.json");
     let text = fs::read_to_string(&recipes_path).with_context(|| {
