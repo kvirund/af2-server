@@ -27,6 +27,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
         add_column(pool, "characters", column, "REAL NOT NULL DEFAULT 0").await?;
     }
     add_column(pool, "characters", "studying", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "characters", "healed_at", "INTEGER NOT NULL DEFAULT 0").await?;
     Ok(())
 }
 
@@ -153,7 +154,7 @@ impl Storage for SqliteStorage {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
         let id = sqlx::query(
-            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(character.account)
         .bind(&character.name)
@@ -169,6 +170,7 @@ impl Storage for SqliteStorage {
         .bind(water)
         .bind(work_points)
         .bind(character.studying)
+        .bind(character.healed_at)
         .execute(&mut *transaction)
         .await?
         .last_insert_rowid();
@@ -178,13 +180,13 @@ impl Storage for SqliteStorage {
     }
 
     async fn load_character(&self, id: i64) -> Result<Option<CharacterData>> {
-        let row: Option<(i64, String, i32, i64, i64, i64, bool, Option<f32>, f32, f32, f32, f32, f32, i32)> = sqlx::query_as(
-            "SELECT account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying FROM characters WHERE id = ?",
+        let row: Option<(i64, String, i32, i64, i64, i64, bool, Option<f32>, f32, f32, f32, f32, f32, i32, i64)> = sqlx::query_as(
+            "SELECT account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at FROM characters WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((account, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying)) = row else {
+        let Some((account, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at)) = row else {
             return Ok(None);
         };
 
@@ -264,13 +266,14 @@ impl Storage for SqliteStorage {
             known_recipes: known_recipes.into_iter().collect(),
             skills: skills.into_iter().map(|(perk, level, experience)| (perk, Skill { level, experience })).collect(),
             studying,
+            healed_at,
         }))
     }
 
     async fn save_character(&self, character: &CharacterData) -> Result<()> {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ? WHERE id = ?")
+        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ?, healed_at = ? WHERE id = ?")
             .bind(character.level)
             .bind(character.experience)
             .bind(character.money)
@@ -283,6 +286,7 @@ impl Storage for SqliteStorage {
             .bind(water)
             .bind(work_points)
             .bind(character.studying)
+            .bind(character.healed_at)
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
@@ -348,6 +352,7 @@ mod tests {
         character.known_recipes.insert(142, 10);
         character.skills.insert(100, Skill { level: 2, experience: 150.5 });
         character.studying = 100;
+        character.healed_at = 1_700_000_000;
         character.id = store.create_character(&character).await.unwrap();
 
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);

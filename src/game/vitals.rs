@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use super::{Conn, Outcome, Player, Session, active, fishing, inventory, perks, travel};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{ProgressionSettings, Settings, VitalsSettings};
+use crate::config::{DoctorSettings, ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
 use crate::storage::{CharacterData, Vitals};
 
@@ -172,6 +172,18 @@ pub fn tire(player: &mut Player, amount: f32) {
     keep_busy(player);
     if let Some(vitals) = player.data.vitals.as_mut() {
         vitals.values[STAMINA] = (vitals.values[STAMINA] - amount).max(0.0);
+    }
+}
+
+/// The doctor's treatment, within the character's limits.
+pub fn heal(settings: &Settings, catalog: &crate::config::Catalog, character: &mut CharacterData, doctor: &DoctorSettings) {
+    let limits = limits(settings, catalog, character);
+    if let Some(vitals) = character.vitals.as_mut() {
+        vitals.values[LIFE] += doctor.life;
+        vitals.values[RADIATION] += doctor.radiation;
+        vitals.values[FOOD] += doctor.food;
+        vitals.values[WATER] += doctor.water;
+        keep_in_range(&settings.vitals, &limits, vitals);
     }
 }
 

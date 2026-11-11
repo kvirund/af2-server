@@ -329,10 +329,29 @@ pub struct Settings {
     #[serde(skip)]
     pub gathering: GatheringSettings,
     pub skills: SkillSettings,
+    pub doctor: DoctorSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
     pub starter_kit: Vec<StarterItem>,
+}
+
+/// The doctor in a base's scene, who heals for a fish.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DoctorSettings {
+    /// The NPC's id in the base scene, which is also its dialog file.
+    pub npc: i32,
+    pub base: i32,
+    /// The highest character level the doctor still heals.
+    pub max_level: i32,
+    /// A fish lighter than this is not taken.
+    pub min_fish_grams: i32,
+    pub cooldown_minutes: i64,
+    pub life: f32,
+    pub radiation: f32,
+    pub food: f32,
+    pub water: f32,
 }
 
 /// Studying skills. The cost of a level comes from the game's own tree.

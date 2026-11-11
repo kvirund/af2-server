@@ -3,6 +3,7 @@
 
 mod character;
 mod crafting;
+mod doctor;
 mod fishing;
 mod gathering;
 mod inventory;
@@ -94,6 +95,8 @@ pub struct Player {
     /// The base and point whose gathering bar is running.
     pub harvesting: Option<(i32, i32)>,
     pub landed: HashMap<i64, CaughtFish>,
+    /// The dialog file whose window is open; the client's answers do not say.
+    pub dialog: Option<i32>,
     pub last_tick: Instant,
     pub last_save: Instant,
     pub last_active: Instant,
@@ -110,6 +113,7 @@ impl Player {
             shown_points: None,
             harvesting: None,
             landed: HashMap::new(),
+            dialog: None,
             last_tick: now,
             last_save: now,
             last_active: now,
@@ -179,9 +183,13 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::FISH_TO_SPARE | msg::FISH_TO_IN_USE => keepnet::move_between_lists(session, message).await,
         msg::FISH_RELEASE => keepnet::release(session, message).await,
         msg::FISH_SWAP_KEEPNETS => keepnet::swap_keepnets(session).await,
-        // Only the NPCs listed in fishMarket.buyers trade fish; the others'
-        // windows are still to do.
-        msg::NPC_TALK => keepnet::open_market(session, message).await,
+        // The doctor talks; of the rest only the NPCs listed in fishMarket.buyers
+        // trade fish, and the others' windows are still to do.
+        msg::NPC_TALK => match doctor::talk(session, message).await? {
+            Some(outcome) => Ok(outcome),
+            None => keepnet::open_market(session, message).await,
+        },
+        msg::DIALOG_ANSWER => doctor::answer(session, message).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,
         id @ (msg::STATISTICS | msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await

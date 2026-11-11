@@ -73,6 +73,8 @@ pub struct CharacterData {
     pub skills: BTreeMap<i32, Skill>,
     /// The skill experience goes to, 0 for none.
     pub studying: i32,
+    /// When the doctor last healed the character, Unix seconds; 0 for never.
+    pub healed_at: i64,
     /// Opens the VIP-only buttons. Set by hand in the database for now.
     pub vip: bool,
     /// `None` until the character first enters the game: it starts at full.

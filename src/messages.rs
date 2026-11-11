@@ -3,6 +3,13 @@
 
 pub const MONEY_CHANGED: i32 = 21;
 pub const NPC_TALK: i32 = 60;
+pub const DIALOG_ANSWER: i32 = 65;
+pub const DIALOG_TEXT: i32 = 70;
+pub const DIALOG_OPTION: i32 = 72;
+pub const DIALOG_OPEN: i32 = 74;
+pub const DIALOG_CLOSE: i32 = 76;
+pub const DIALOG_SPAN: i32 = 82;
+pub const DIALOG_DATE: i32 = 83;
 pub const LOGIN: i32 = 90;
 pub const GO_TO_GAME: i32 = 100;
 pub const CHARACTER_DETAILS: i32 = 100;
