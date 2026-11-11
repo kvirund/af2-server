@@ -187,6 +187,14 @@ pub fn heal(settings: &Settings, catalog: &crate::config::Catalog, character: &m
     }
 }
 
+/// Work points for a landed fish, up to the most a character holds.
+pub fn reward_catch(settings: &VitalsSettings, player: &mut Player, grams: i32) {
+    if let Some(vitals) = player.data.vitals.as_mut() {
+        let gained = settings.work_points_per_kg * (grams / 1000) as f32;
+        vitals.work_points = (vitals.work_points + gained).min(settings.max_work_points.max(vitals.work_points));
+    }
+}
+
 /// What each of the three `basePar` numbers changes, as the item's tooltip says.
 fn targets(kind: i32) -> Option<[usize; 3]> {
     match kind {
@@ -257,6 +265,7 @@ mod tests {
             radiation_per_minute_per_point: 0.1,
             lowest_life: 1.0,
             work_points_per_minute: 10.0,
+            work_points_per_kg: 1.0,
             max_work_points: 3000.0,
             radiation: Default::default(),
         }
@@ -321,5 +330,14 @@ mod tests {
     #[test]
     fn the_client_gets_radiation_before_stamina() {
         assert_eq!(for_client([1, 2, 3, 4, 5]), [1, 3, 2, 4, 5]);
+    }
+
+    #[test]
+    fn every_whole_kilogram_caught_gives_a_work_point() {
+        let mut player = Player::new(CharacterData { vitals: Some(vitals([100.0; COUNT])), ..Default::default() });
+        reward_catch(&settings(), &mut player, 2900);
+        assert_eq!(player.data.vitals.as_ref().unwrap().work_points, 2.0);
+        reward_catch(&settings(), &mut player, 900);
+        assert_eq!(player.data.vitals.as_ref().unwrap().work_points, 2.0);
     }
 }

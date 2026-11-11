@@ -162,6 +162,8 @@ pub struct VitalsSettings {
     pub radiation_per_minute_per_point: f32,
     pub lowest_life: f32,
     pub work_points_per_minute: f32,
+    /// Work points every kilogram of a landed fish gives.
+    pub work_points_per_kg: f32,
     pub max_work_points: f32,
     /// Base to its radiation by day and at night.
     pub radiation: BTreeMap<i32, [f32; 2]>,

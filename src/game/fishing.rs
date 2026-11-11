@@ -306,6 +306,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     conn.log(&format!("   -> 1130 landed species {} {} g as fish {}, worth {shown} exp", fish.species, fish.grams, fish.id));
     let effort = &conn.world.settings.vitals;
     vitals::tire(player, effort.stamina_per_fish + effort.stamina_per_kg * fish.grams as f32 / 1000.0);
+    vitals::reward_catch(effort, player, fish.grams);
     player.landed.insert(fish.id, fish);
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
     loot::after_catch(conn, player).await?;
