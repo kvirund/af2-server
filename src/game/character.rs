@@ -143,9 +143,15 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     player.data.vitals.get_or_insert_with(|| vitals::full(progression, level));
     let kind_of = |template| world.catalog.get(template).map_or(0, |item| item.kind);
     let moved = inventory::move_old_backpack(&world.settings.bags, &mut player.data, kind_of);
-    if moved > 0 {
+    let info = |template| {
+        world.catalog.get(template).map_or(inventory::StackInfo { kind: 0, stacks: false, max_count: 1 }, |item| {
+            inventory::StackInfo { kind: item.kind, stacks: item.stacks, max_count: item.max_count }
+        })
+    };
+    let separated = inventory::separate_shared_cells(&world.settings.bags, &mut player.data, info);
+    if moved > 0 || separated > 0 {
         session.conn.save(player).await?;
-        session.conn.log(&format!("   moved {moved} items from the old backpack onto pages"));
+        session.conn.log(&format!("   moved {moved} items from the old backpack onto pages, {separated} out of shared cells"));
     }
 
     let start_base = world.settings.character.start_base;

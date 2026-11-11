@@ -83,6 +83,47 @@ pub fn move_old_backpack(
     moved
 }
 
+/// What the repair needs to know of a template: its kind, whether it stacks and
+/// how many fit in one cell.
+pub struct StackInfo {
+    pub kind: i32,
+    pub stacks: bool,
+    pub max_count: i32,
+}
+
+/// Older saves could have two things in one cell, which the client draws as one.
+/// The same thing goes onto the first stack as far as it fits; the rest moves to
+/// a free cell of its page, or stays put when the page is full.
+pub fn separate_shared_cells(settings: &BagSettings, character: &mut CharacterData, info: impl Fn(i32) -> StackInfo) -> usize {
+    let mut changed = 0;
+    let mut index = 0;
+    while index < character.items.len() {
+        let item = character.items[index].clone();
+        let first = character.items[..index].iter().position(|other| (other.bag, other.cell) == (item.bag, item.cell));
+        let Some(first) = first else {
+            index += 1;
+            continue;
+        };
+        changed += 1;
+        let about = info(item.template);
+        let target = &mut character.items[first];
+        if about.stacks && target.template == item.template {
+            let poured = item.count.min(about.max_count - target.count).max(0);
+            target.count += poured;
+            character.items[index].count -= poured;
+            if character.items[index].count <= 0 {
+                character.items.remove(index);
+                continue;
+            }
+        }
+        if let Some((bag, cell)) = free_place(settings, character, about.kind, Some(item.id), &[]) {
+            (character.items[index].bag, character.items[index].cell) = (bag, cell);
+        }
+        index += 1;
+    }
+    changed
+}
+
 /// Puts an item in a cell. Whatever lay there takes the item's old place, so
 /// two things never share a cell. The moved items, the asked one first.
 fn put_in_cell(character: &mut CharacterData, id: i64, bag: i32, cell: i32) -> Option<Vec<ItemEntry>> {
@@ -685,5 +726,19 @@ mod tests {
         let moved = put_in_cell(&mut character, 2, 1, 0).unwrap();
         assert_eq!(moved.iter().map(|item| (item.id, item.cell)).collect::<Vec<_>>(), vec![(2, 0), (1, 1)]);
         assert_eq!(put_in_cell(&mut character, 1, 1, 5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn things_sharing_a_cell_are_stacked_or_moved_apart() {
+        let info = |template| StackInfo { kind: if template == 1089 { 5 } else { 10 }, stacks: template == 1089, max_count: 30 };
+        let mut character = CharacterData {
+            items: vec![held(1, 0, 1018), held(2, 0, 1089), held(3, 1, 1089), held(4, 1, 1089)],
+            ..Default::default()
+        };
+        character.items[2].count = 3;
+        character.items[3].count = 3;
+        assert_eq!(separate_shared_cells(&bags(), &mut character, info), 2);
+        let places: Vec<_> = character.items.iter().map(|item| (item.id, item.bag, item.cell, item.count)).collect();
+        assert_eq!(places, vec![(1, 1, 0, 1), (2, 2, 0, 1), (3, 1, 1, 6)]);
     }
 }
