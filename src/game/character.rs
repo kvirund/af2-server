@@ -180,7 +180,8 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int32(0).int64(0);
 
     let current = character.vitals.clone().unwrap_or_else(|| vitals::full(progression, character.level));
-    for (max, value) in vitals::maxima(progression, character.level).iter().zip(current.values) {
+    let maxima = vitals::for_client(vitals::maxima(progression, character.level));
+    for (max, value) in maxima.iter().zip(vitals::for_client(current.values)) {
         w.int32(*max as i32).single(value);
     }
 

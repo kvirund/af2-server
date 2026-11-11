@@ -16,6 +16,15 @@ const STAMINA: usize = 1;
 const RADIATION: usize = 2;
 const FOOD: usize = 3;
 const WATER: usize = 4;
+/// The client's order of the five: health, radiation resistance, stamina, food,
+/// water (labels gi_uinf_5..9 of its character info, and the order case 1000 and
+/// the character card are read in).
+const CLIENT_ORDER: [usize; COUNT] = [LIFE, RADIATION, STAMINA, FOOD, WATER];
+
+/// The five values in the order the client reads them.
+pub fn for_client<T: Copy>(values: [T; COUNT]) -> [T; COUNT] {
+    CLIENT_ORDER.map(|index| values[index])
+}
 
 const FOOD_KIND: i32 = 21;
 const DRINK_KIND: i32 = 22;
@@ -118,7 +127,7 @@ pub async fn send(conn: &Conn, player: &Player) -> Result<()> {
         return Ok(());
     };
     let mut w = AfcWriter::new();
-    for value in vitals.values {
+    for value in for_client(vitals.values) {
         w.single(value);
     }
     w.double(0.0).double(0.0).double(0.0).single(vitals.work_points).single(0.0);
@@ -267,5 +276,10 @@ mod tests {
         assert_eq!(effect(22, xml), Some([(FOOD, 10.0), (WATER, -15.0), (STAMINA, 5.0)]));
         assert_eq!(effect(23, xml), Some([(LIFE, 10.0), (RADIATION, -15.0), (STAMINA, 5.0)]));
         assert_eq!(effect(1, xml), None);
+    }
+
+    #[test]
+    fn the_client_gets_radiation_before_stamina() {
+        assert_eq!(for_client([1, 2, 3, 4, 5]), [1, 3, 2, 4, 5]);
     }
 }
