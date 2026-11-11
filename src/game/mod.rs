@@ -169,6 +169,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::SHOP_BUY => shop::buy(session, message).await,
         msg::ITEM_MOVE => inventory::move_item(session, message).await,
         msg::ITEM_SWAP => inventory::swap_items(session, message).await,
+        msg::ITEM_MERGE => inventory::merge_items(session, message).await,
 
         msg::BITE => fishing::bite(session, message).await,
         msg::FISH_LANDED => fishing::landed(session, message).await,

@@ -60,6 +60,7 @@ pub const LOOT: i32 = 126;
 pub const ITEM_UPDATES: i32 = 181;
 pub const ITEM_MOVE: i32 = 182;
 pub const ITEM_SWAP: i32 = 184;
+pub const ITEM_MERGE: i32 = 195;
 pub const HEARTBEAT: i32 = 255;
 pub const ACTIVE_ICONS: i32 = 260;
 pub const FISH_SWAP_KEEPNETS: i32 = 285;

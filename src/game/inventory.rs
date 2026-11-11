@@ -311,6 +311,60 @@ pub async fn swap_items(session: &mut Session, message: &AfcMessage) -> Result<O
     Ok(Outcome::Answered)
 }
 
+/// Pours `source` onto `target`, as far as one cell holds. The two must be the
+/// same thing. `None` when they are not, or either is missing.
+fn merge(character: &mut CharacterData, target: i64, source: i64, capacity: i32) -> Option<Split> {
+    let to = character.items.iter().position(|item| item.id == target)?;
+    let from = character.items.iter().position(|item| item.id == source)?;
+    if to == from || character.items[to].template != character.items[from].template {
+        return None;
+    }
+    let moved = character.items[from].count.min(capacity - character.items[to].count).max(0);
+    character.items[to].count += moved;
+    character.items[from].count -= moved;
+    let mut changed = vec![character.items[to].clone()];
+    let removed = if character.items[from].count <= 0 {
+        character.items.remove(from);
+        Some(source)
+    } else {
+        changed.push(character.items[from].clone());
+        None
+    };
+    Some(Split { changed, removed })
+}
+
+/// Client: long item dropped on, long item dragged. The client has already
+/// put the stacks together on its side and waits for no reply.
+pub async fn merge_items(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let mut r = message.reader();
+    let (target, source) = (r.int64()?, r.int64()?);
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let capacity = player
+        .data
+        .items
+        .iter()
+        .find(|item| item.id == target)
+        .and_then(|item| conn.world.catalog.get(item.template))
+        .filter(|template| template.stacks)
+        .map(|template| template.max_count.max(1));
+
+    let Some(done) = capacity.and_then(|capacity| merge(&mut player.data, target, source, capacity)) else {
+        conn.log(&format!("   merge of {source} onto {target} refused"));
+        let unchanged: Vec<_> =
+            player.data.items.iter().filter(|item| item.id == target || item.id == source).cloned().collect();
+        send_updates(conn, player.data.id, &unchanged).await?;
+        return Ok(Outcome::Answered);
+    };
+    conn.save(player).await?;
+    send_updates(conn, player.data.id, &done.changed).await?;
+    if let Some(removed) = done.removed {
+        send_removed(conn, removed).await?;
+    }
+    conn.log(&format!("   -> 181 merged item {source} onto {target}"));
+    Ok(Outcome::Answered)
+}
+
 /// Why a purchase failed, as the status word the client shows.
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuyError {
@@ -462,6 +516,27 @@ mod tests {
 
     fn stack(id: i64, bag: i32, cell: i32, count: i32, template: i32) -> ItemEntry {
         ItemEntry { id, bag, cell, count, durability: 1.0, template }
+    }
+
+    #[test]
+    fn merging_fills_the_target_up_to_a_cell() {
+        let mut character =
+            CharacterData { items: vec![stack(1, 0, 0, 15, 1010), stack(2, 0, 1, 10, 1010)], ..Default::default() };
+        let done = merge(&mut character, 1, 2, 20).unwrap();
+        assert_eq!((character.items[0].count, character.items[1].count), (20, 5));
+        assert_eq!((done.changed.len(), done.removed), (2, None));
+
+        let done = merge(&mut character, 1, 2, 30).unwrap();
+        assert_eq!(character.items.len(), 1);
+        assert_eq!((character.items[0].count, done.removed), (25, Some(2)));
+    }
+
+    #[test]
+    fn different_things_do_not_merge() {
+        let mut character =
+            CharacterData { items: vec![stack(1, 0, 0, 1, 1010), stack(2, 0, 1, 1, 1088)], ..Default::default() };
+        assert!(merge(&mut character, 1, 2, 20).is_none());
+        assert!(merge(&mut character, 1, 1, 20).is_none());
     }
 
     #[test]
