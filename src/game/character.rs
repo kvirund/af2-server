@@ -179,13 +179,16 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int32(settings.character.start_base).int32(0); // base, location
     w.int32(0).int64(0);
 
+    // An int the client reads and never uses, then each scale as float value,
+    // int maximum. Writing the maximum first shifted every maximum one scale
+    // along and left water with a maximum of 0: an empty bar that never filled.
+    w.int32(0);
     let current = character.vitals.clone().unwrap_or_else(|| vitals::full(progression, character.level));
     let maxima = vitals::for_client(vitals::maxima(progression, character.level));
     for (max, value) in maxima.iter().zip(vitals::for_client(current.values)) {
-        w.int32(*max as i32).single(value);
+        w.single(value).int32(*max as i32);
     }
 
-    w.int32(0);
     let bonuses = perks::worn_bonuses(&settings.bags, &conn.world.catalog, character);
     for value in perks::attributes(&bonuses) {
         w.int32(value);
