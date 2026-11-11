@@ -5,6 +5,7 @@ mod client_patch;
 mod items;
 mod local_server;
 mod recipes;
+mod skills;
 mod steam;
 
 use std::io::stdin;
@@ -93,6 +94,7 @@ fn run(options: Options) -> Result<()> {
 
     items::ensure_extracted(&game, &data_dir)?;
     recipes::ensure_extracted(&game, &data_dir)?;
+    skills::ensure_extracted(&game, &data_dir)?;
     let target = choice::choose(&config_dir, &data_dir, options.server)?;
     point_client_at(&game, target.host())?;
 

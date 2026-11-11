@@ -8,7 +8,7 @@ use rand::random;
 use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, Instant};
 
-use super::{Conn, Outcome, Player, Session, active, inventory, travel, vitals};
+use super::{Conn, Outcome, Player, Session, active, inventory, perks, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{GatherResource, GatheringSettings};
 use crate::messages as msg;
@@ -154,8 +154,9 @@ pub async fn start(session: &mut Session, message: &AfcMessage) -> Result<Outcom
     if work_points(player) < info.work_points {
         return reply(conn, msg::HARVEST_START, "nowp=0").await;
     }
-    if info.skill_level > 0 {
-        conn.log(&format!("   {} needs {} {}; skills are not modelled, so it is allowed", info.name, info.skill, info.skill_level));
+    if info.skill_level > 0 && perks::level_of(conn, player, info.skill) < info.skill_level {
+        conn.log(&format!("   {} needs skill {} at level {}", info.name, info.skill, info.skill_level));
+        return reply(conn, msg::HARVEST_START, "noproff=0").await;
     }
     player.harvesting = Some((base, point));
     reply(conn, msg::HARVEST_START, &format!("ok={}", info.seconds)).await
@@ -294,7 +295,7 @@ mod tests {
             name: String::new(),
             work_points: 1.0,
             seconds: 1.0,
-            skill: String::new(),
+            skill: 0,
             skill_level: 0,
             rolls: 3,
             drops: vec![drop(1, 1.0, 2, 4), drop(2, 1.0, 1, 1)],

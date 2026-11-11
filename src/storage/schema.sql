@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS characters (
     radiation REAL NOT NULL DEFAULT 0,
     food REAL NOT NULL DEFAULT 0,
     water REAL NOT NULL DEFAULT 0,
-    work_points REAL NOT NULL DEFAULT 0
+    work_points REAL NOT NULL DEFAULT 0,
+    studying INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS items (
@@ -60,6 +61,14 @@ CREATE TABLE IF NOT EXISTS known_recipes (
     recipe INTEGER NOT NULL,
     uses INTEGER NOT NULL,
     PRIMARY KEY (character_id, recipe)
+);
+
+CREATE TABLE IF NOT EXISTS skills (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    perk INTEGER NOT NULL,
+    level INTEGER NOT NULL,
+    experience REAL NOT NULL,
+    PRIMARY KEY (character_id, perk)
 );
 
 CREATE TABLE IF NOT EXISTS id_sequence (

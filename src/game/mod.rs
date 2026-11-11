@@ -12,6 +12,7 @@ mod panels;
 mod perks;
 mod refining;
 mod shop;
+mod skills;
 mod travel;
 mod vitals;
 
@@ -186,6 +187,8 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
             panels::empty_tab(session, message, id).await
         }
         msg::PERKS => perks::window(session).await,
+        msg::PERK_STUDY => skills::choose_study(session, message).await,
+        msg::COURSE_STUDY => skills::study_course(session, message).await,
         msg::AUCTION => panels::auction(session).await,
         msg::ARTELS => panels::artels(session).await,
         id @ (msg::CRAFT | msg::CRAFT_STATION) => crafting::station(session, message, id).await,

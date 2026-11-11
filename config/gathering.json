@@ -24,7 +24,7 @@
 // что в сцене базы точки не делятся по локациям (гайд называет локации, здесь всё на всю базу),
 // Изумрудное озеро (в гайдах сбора его нет, а точки в сцене есть: оставлены пни и норы),
 // все веса, количества, время сбора и возрождения.
-// Навыки пока не проверяются: навыков на сервере ещё нет, skill и skillLevel записаны на будущее.
+// skill и skillLevel: какой навык и какого уровня нужен (130 Ремесло, 145 Грибник), по гайду.
 {
   // Через сколько минут пустая точка снова зарастает: случайно между двумя числами
   "respawnMinutes": [10, 30],
@@ -52,32 +52,32 @@
       { "item": 1089, "weight": 30, "min": 1, "max": 3 },
       { "item": 1010, "weight": 30, "min": 2, "max": 6 }
     ] },
-    "1": { "name": "Гриб жукомор", "workPoints": 10, "seconds": 2, "skill": "Грибник", "skillLevel": 2, "drops": [
+    "1": { "name": "Гриб жукомор", "workPoints": 10, "seconds": 2, "skill": 145, "skillLevel": 2, "drops": [
       { "item": 1076, "weight": 1, "min": 1, "max": 2 }
     ] },
-    "2": { "name": "Грибы остроголовники", "workPoints": 0, "seconds": 2, "skill": "Грибник", "skillLevel": 1, "drops": [
+    "2": { "name": "Грибы остроголовники", "workPoints": 0, "seconds": 2, "skill": 145, "skillLevel": 1, "drops": [
       { "item": 1077, "weight": 1, "min": 2, "max": 4 }
     ] },
-    "3": { "name": "Гриб рощевик", "workPoints": 100, "seconds": 2, "skill": "Грибник", "skillLevel": 3, "drops": [
+    "3": { "name": "Гриб рощевик", "workPoints": 100, "seconds": 2, "skill": 145, "skillLevel": 3, "drops": [
       { "item": 1078, "weight": 90, "min": 1, "max": 2 },
       { "item": 1079, "weight": 10, "min": 1, "max": 1 }
     ] },
-    "21": { "name": "Дикий лук", "workPoints": 100, "seconds": 4, "skill": "Ремесло", "skillLevel": 3, "drops": [
+    "21": { "name": "Дикий лук", "workPoints": 100, "seconds": 4, "skill": 130, "skillLevel": 3, "drops": [
       { "item": 1084, "weight": 1, "min": 1, "max": 3 }
     ] },
-    "22": { "name": "Горлодёр", "workPoints": 100, "seconds": 4, "skill": "Ремесло", "skillLevel": 3, "drops": [
+    "22": { "name": "Горлодёр", "workPoints": 100, "seconds": 4, "skill": 130, "skillLevel": 3, "drops": [
       { "item": 1085, "weight": 1, "min": 1, "max": 3 }
     ] },
-    "25": { "name": "Картофель", "workPoints": 100, "seconds": 4, "skill": "Ремесло", "skillLevel": 1, "drops": [
+    "25": { "name": "Картофель", "workPoints": 100, "seconds": 4, "skill": 130, "skillLevel": 1, "drops": [
       { "item": 1318, "weight": 1, "min": 2, "max": 4 }
     ] },
-    "26": { "name": "Кукуруза", "workPoints": 100, "seconds": 4, "skill": "Ремесло", "skillLevel": 1, "drops": [
+    "26": { "name": "Кукуруза", "workPoints": 100, "seconds": 4, "skill": 130, "skillLevel": 1, "drops": [
       { "item": 1319, "weight": 1, "min": 2, "max": 4 }
     ] },
-    "27": { "name": "Тыква", "workPoints": 100, "seconds": 4, "skill": "Ремесло", "skillLevel": 1, "drops": [
+    "27": { "name": "Тыква", "workPoints": 100, "seconds": 4, "skill": 130, "skillLevel": 1, "drops": [
       { "item": 1320, "weight": 1, "min": 1, "max": 2 }
     ] },
-    "104": { "name": "Мешок с мусором", "workPoints": 250, "seconds": 5, "skill": "Ремесло", "skillLevel": 3, "rolls": 2, "drops": [
+    "104": { "name": "Мешок с мусором", "workPoints": 250, "seconds": 5, "skill": 130, "skillLevel": 3, "rolls": 2, "drops": [
       { "item": 1268, "weight": 20, "min": 1, "max": 3 },
       { "item": 1269, "weight": 20, "min": 1, "max": 3 },
       { "item": 1270, "weight": 15, "min": 1, "max": 2 },
@@ -95,7 +95,7 @@
       { "item": 1266, "weight": 1, "min": 1, "max": 1 },
       { "item": 1281, "weight": 1, "min": 1, "max": 1 }
     ] },
-    "105": { "name": "Куча мусора", "workPoints": 250, "seconds": 6, "skill": "Ремесло", "skillLevel": 3, "rolls": 3, "drops": [
+    "105": { "name": "Куча мусора", "workPoints": 250, "seconds": 6, "skill": 130, "skillLevel": 3, "rolls": 3, "drops": [
       { "item": 1268, "weight": 20, "min": 1, "max": 3 },
       { "item": 1269, "weight": 20, "min": 1, "max": 3 },
       { "item": 1270, "weight": 15, "min": 1, "max": 2 },

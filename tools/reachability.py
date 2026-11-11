@@ -73,10 +73,11 @@ def is_test(i):
 sources = defaultdict(set)
 shop = settings.get("shop", {})
 hidden_kinds, hidden_items = set(shop.get("hiddenKinds", [])), set(shop.get("hiddenItems", []))
+prices = {int(i): cost for i, cost in shop.get("prices", {}).items()}
 for base, ids in shops["bases"].items():
     for i in ids:
         item = items.get(i)
-        if item and item["cost"] > 0 and item["kind"] not in hidden_kinds and i not in hidden_items:
+        if item and prices.get(i, item["cost"]) > 0 and item["kind"] not in hidden_kinds and i not in hidden_items:
             sources[i].add(f"магазин базы {base}")
 for kit in settings["starterKit"]:
     sources[kit["item"]].add("стартовый набор")

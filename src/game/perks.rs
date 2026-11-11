@@ -1,13 +1,14 @@
-//! Skills and attributes. Items give them through `<addPerk>id/level/0</addPerk>`;
-//! the client adds nothing up itself, it shows what the server sends.
+//! Skills and attributes as the client sees them: levels studied (see
+//! `skills.rs`) plus what items give through `<addPerk>id/level/0</addPerk>`.
+//! The client adds nothing up itself, it shows what the server sends.
 
 use std::collections::BTreeMap;
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active};
+use super::{Conn, Outcome, Player, Session, active, skills};
 use crate::afc::AfcWriter;
-use crate::config::{AttributeSettings, BagSettings, Catalog};
+use crate::config::{AttributeSettings, BagSettings, Catalog, Settings};
 use crate::messages as msg;
 use crate::storage::CharacterData;
 
@@ -62,6 +63,15 @@ pub fn worn_bonuses(bags: &BagSettings, catalog: &Catalog, character: &Character
     combine(bags, gear)
 }
 
+/// Studied levels plus what the gear gives: what every rule of the game reads.
+pub fn levels(settings: &Settings, catalog: &Catalog, character: &CharacterData) -> BTreeMap<i32, i32> {
+    let mut levels = worn_bonuses(&settings.bags, catalog, character);
+    for (perk, skill) in &character.skills {
+        *levels.entry(*perk).or_insert(0) += skill.level;
+    }
+    levels
+}
+
 /// Four base attributes, then the same four with the bonuses.
 pub fn attributes(bonuses: &BTreeMap<i32, i32>) -> [i32; 8] {
     let bonus = |perk: &i32| bonuses.get(perk).copied().unwrap_or(0);
@@ -91,39 +101,111 @@ fn effects_of(settings: &AttributeSettings, attributes: &[i32; 8]) -> Effects {
 }
 
 pub fn effects(conn: &Conn, player: &Player) -> Effects {
-    effects_of(&conn.world.settings.attributes, &attributes(&bonuses_of(conn, player)))
+    effects_of(&conn.world.settings.attributes, &attributes(&levels_of(conn, player)))
 }
 
-/// Cases 1400 and 1401: int used, int limit, then until the end of the message
-/// int perk, bool learned, int level, int level with bonuses, float exp, int exp
-/// to the next level. Nothing can be learned yet, so every entry is a bonus.
-fn perk_list(bonuses: &BTreeMap<i32, i32>) -> Vec<u8> {
+/// A skill's level with everything that adds to it.
+pub fn level_of(conn: &Conn, player: &Player, perk: i32) -> i32 {
+    levels_of(conn, player).get(&perk).copied().unwrap_or(0)
+}
+
+/// One line of the skills window: int perk, bool studied, int level, int level
+/// with bonuses, float points, int points to the next level. Without "studied"
+/// the client will not put the skill on study and draws no progress bar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Entry {
+    pub perk: i32,
+    pub studied: bool,
+    pub level: i32,
+    pub total: i32,
+    pub points: f32,
+    pub to_next: i32,
+}
+
+fn write_entry(w: &mut AfcWriter, entry: &Entry) {
+    w.int32(entry.perk).boolean(entry.studied).int32(entry.level).int32(entry.total);
+    w.single(entry.points).int32(entry.to_next);
+}
+
+fn entry(settings: &Settings, bonuses: &BTreeMap<i32, i32>, character: &CharacterData, perk: i32) -> Entry {
+    let bonus = bonuses.get(&perk).copied().unwrap_or(0);
+    match character.skills.get(&perk) {
+        Some(skill) => Entry {
+            perk,
+            studied: true,
+            level: skill.level,
+            total: skill.level + bonus,
+            points: skill.experience as f32,
+            to_next: skills::points_to_next(&settings.skill_tree, &settings.skills, perk, skill.level).round() as i32,
+        },
+        None => Entry { perk, studied: false, level: 0, total: bonus, points: 0.0, to_next: 0 },
+    }
+}
+
+/// Every studied skill and every skill some worn item gives.
+fn entries(settings: &Settings, catalog: &Catalog, character: &CharacterData) -> Vec<Entry> {
+    let bonuses = worn_bonuses(&settings.bags, catalog, character);
+    let mut perks: Vec<i32> = character.skills.keys().chain(bonuses.keys()).copied().collect();
+    perks.sort_unstable();
+    perks.dedup();
+    perks.into_iter().map(|perk| entry(settings, &bonuses, character, perk)).collect()
+}
+
+/// Cases 1400 and 1401: int levels used, int limit, then entries to the end.
+fn perk_list(used: i32, limit: i32, entries: &[Entry]) -> Vec<u8> {
     let mut w = AfcWriter::new();
-    w.int32(0).int32(0);
-    for (perk, level) in bonuses {
-        w.int32(*perk).boolean(false).int32(0).int32(*level).single(0.0).int32(0);
+    w.int32(used).int32(limit);
+    for entry in entries {
+        write_entry(&mut w, entry);
     }
     w.finish()
 }
 
-fn bonuses_of(conn: &Conn, player: &Player) -> BTreeMap<i32, i32> {
-    worn_bonuses(&conn.world.settings.bags, &conn.world.catalog, &player.data)
+fn levels_of(conn: &Conn, player: &Player) -> BTreeMap<i32, i32> {
+    levels(&conn.world.settings, &conn.world.catalog, &player.data)
+}
+
+fn list_for(conn: &Conn, player: &Player) -> (Vec<u8>, String) {
+    let settings = &conn.world.settings;
+    let character = &player.data;
+    let (used, limit) = (skills::used(character), skills::limit(&settings.skills, character.level));
+    let entries = entries(settings, &conn.world.catalog, character);
+    let shown: Vec<String> = entries.iter().map(|entry| format!("{}:{}", entry.perk, entry.total)).collect();
+    (perk_list(used, limit, &entries), format!("limit {used}/{limit}, {}", shown.join(" ")))
 }
 
 /// Tells the client without opening its window; its fishing formulas read these.
 pub async fn send(conn: &Conn, player: &Player) -> Result<()> {
-    let bonuses = bonuses_of(conn, player);
-    conn.send(msg::PERKS_UPDATE, perk_list(&bonuses)).await?;
-    conn.log(&format!("   -> 1400 perks from gear {bonuses:?}"));
+    let (list, shown) = list_for(conn, player);
+    conn.send(msg::PERKS_UPDATE, list).await?;
+    conn.log(&format!("   -> 1400 perks {shown}"));
     Ok(())
 }
 
 pub async fn window(session: &mut Session) -> Result<Outcome> {
     let player = active(&mut session.player)?;
-    let bonuses = bonuses_of(&session.conn, player);
-    session.conn.send(msg::PERKS, perk_list(&bonuses)).await?;
-    session.conn.log(&format!("   -> 1401 perks from gear {bonuses:?}"));
+    let (list, shown) = list_for(&session.conn, player);
+    session.conn.send(msg::PERKS, list).await?;
+    session.conn.log(&format!("   -> 1401 perks {shown}"));
     Ok(Outcome::Answered)
+}
+
+/// Case 1408 shows "Изучен навык ... N уровня" (or "Получен навык" at level 0)
+/// for each entry; case 1410 changes the entries without a word.
+pub async fn announce(conn: &Conn, player: &Player, perks: &[i32], loud: bool) -> Result<()> {
+    if perks.is_empty() {
+        return Ok(());
+    }
+    let settings = &conn.world.settings;
+    let bonuses = worn_bonuses(&settings.bags, &conn.world.catalog, &player.data);
+    let mut w = AfcWriter::new();
+    for perk in perks {
+        write_entry(&mut w, &entry(settings, &bonuses, &player.data, *perk));
+    }
+    let id = if loud { msg::PERK_LEARNED } else { msg::PERKS_QUIET };
+    conn.send(id, w.finish()).await?;
+    conn.log(&format!("   -> {id} perks {perks:?}"));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -196,8 +278,8 @@ mod tests {
 
     #[test]
     fn the_list_has_one_entry_per_perk() {
-        let bonuses = [(540, 5)].into();
+        let entry = Entry { perk: 540, studied: false, level: 0, total: 5, points: 0.0, to_next: 0 };
         // Two header ints, then int, byte, int, int, float, int.
-        assert_eq!(perk_list(&bonuses).len(), 8 + 21);
+        assert_eq!(perk_list(0, 0, &[entry]).len(), 8 + 21);
     }
 }

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, inventory, keepnet, panels, perks, travel, vitals};
+use super::{Account, Conn, Outcome, Player, Session, inventory, keepnet, panels, perks, skills, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -157,6 +157,7 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     }
     inventory::send_all(&session.conn, player).await?;
     perks::send(&session.conn, player).await?;
+    skills::send_study(&session.conn, player).await?;
     keepnet::send_all(&session.conn, player).await?;
     session.conn.send(msg::LOAD_BASE, Vec::new()).await?;
     session.conn.log(&format!("   -> 145, 150, 100, 180, 174, 175, 151 entered as {character_id}"));
@@ -189,7 +190,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
         w.single(value).int32(*max as i32);
     }
 
-    let bonuses = perks::worn_bonuses(&settings.bags, &conn.world.catalog, character);
+    let bonuses = perks::levels(settings, &conn.world.catalog, character);
     for value in perks::attributes(&bonuses) {
         w.int32(value);
     }
@@ -216,6 +217,7 @@ pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32,
     let cost = perks::effects(conn, player).level_cost;
     let reached = add_experience(&conn.world.settings.progression, &mut player.data, gained, cost);
     conn.save(player).await?;
+    skills::give(conn, player, skills::share(&conn.world.settings.skills, gained)).await?;
 
     let progression = &conn.world.settings.progression;
     let mut w = AfcWriter::new();

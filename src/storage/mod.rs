@@ -3,7 +3,7 @@
 
 mod sqlite;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -44,6 +44,14 @@ pub struct Vitals {
     pub work_points: f32,
 }
 
+/// A skill the character has studied: its level without gear bonuses and the
+/// points gathered towards the next one.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Skill {
+    pub level: i32,
+    pub experience: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CharacterData {
     pub id: i64,
@@ -61,6 +69,10 @@ pub struct CharacterData {
     pub bag_extra: HashMap<i32, i32>,
     /// Uses left of each learned recipe, negative meaning no limit.
     pub known_recipes: HashMap<i32, i32>,
+    /// Skills opened by a course, by perk id; sub-skills start at level 0.
+    pub skills: BTreeMap<i32, Skill>,
+    /// The skill experience goes to, 0 for none.
+    pub studying: i32,
     /// Opens the VIP-only buttons. Set by hand in the database for now.
     pub vip: bool,
     /// `None` until the character first enters the game: it starts at full.

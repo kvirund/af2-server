@@ -197,10 +197,9 @@ pub struct GatherResource {
     pub name: String,
     pub work_points: f32,
     pub seconds: f32,
-    /// The skill (Ремесло, Грибник) and its level a player guide names;
-    /// skills are not modelled yet.
+    /// The skill (130 Ремесло, 145 Грибник) and its level a player guide names.
     #[serde(default)]
-    pub skill: String,
+    pub skill: i32,
     #[serde(default)]
     pub skill_level: i32,
     #[serde(default = "one")]
@@ -329,7 +328,58 @@ pub struct Settings {
     /// From `config/gathering.json`; without that file nothing can be gathered.
     #[serde(skip)]
     pub gathering: GatheringSettings,
+    pub skills: SkillSettings,
+    /// From `data/skills.json`, which af2-launcher makes from the game.
+    #[serde(skip)]
+    pub skill_tree: SkillTree,
     pub starter_kit: Vec<StarterItem>,
+}
+
+/// Studying skills. The cost of a level comes from the game's own tree.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSettings {
+    /// Share of every experience gain that goes to the skill being studied.
+    pub experience_percent: f64,
+    /// Points a second copy of a course gives to its skill while it is studied.
+    pub course_experience: f64,
+    /// Points it gives instead to a studied sub-skill once the skill is at the top.
+    pub course_sub_experience: f64,
+    pub max_level: i32,
+    /// Levels of all skills together a character may have: base + perLevel * level.
+    pub limit_base: i32,
+    pub limit_per_level: i32,
+}
+
+/// One skill of the game's tree.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SkillNode {
+    pub id: i32,
+    /// 0 for a main skill.
+    pub parent: i32,
+    /// What one level gives, as the client's description uses it.
+    pub effect: [f64; 3],
+    /// Points to the next level: a + b * (c + level).
+    pub cost: [f64; 3],
+}
+
+#[derive(Debug, Default)]
+pub struct SkillTree {
+    nodes: BTreeMap<i32, SkillNode>,
+}
+
+impl SkillTree {
+    pub fn new(nodes: Vec<SkillNode>) -> Self {
+        Self { nodes: nodes.into_iter().map(|node| (node.id, node)).collect() }
+    }
+
+    pub fn get(&self, id: i32) -> Option<&SkillNode> {
+        self.nodes.get(&id)
+    }
+
+    pub fn children(&self, id: i32) -> impl Iterator<Item = &SkillNode> {
+        self.nodes.values().filter(move |node| node.parent == id)
+    }
 }
 
 /// A species as players recorded it. The weights are the thresholds of the
@@ -488,6 +538,13 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
         format!("{} is missing; run af2-launcher first", recipes_path.display())
     })?;
     let recipes: Vec<Recipe> = serde_json::from_str(&text).with_context(|| recipes_path.display().to_string())?;
+
+    let skills_path = root.join("data").join("skills.json");
+    let text = fs::read_to_string(&skills_path).with_context(|| {
+        format!("{} is missing; run af2-launcher first", skills_path.display())
+    })?;
+    let nodes: Vec<SkillNode> = serde_json::from_str(&text).with_context(|| skills_path.display().to_string())?;
+    settings.skill_tree = SkillTree::new(nodes);
 
     for kit in &settings.starter_kit {
         if catalog.get(kit.item).is_none() {
