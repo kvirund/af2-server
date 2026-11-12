@@ -73,7 +73,14 @@ def lure_key(s):
     return re.sub(r"-([123])\b", lambda m: "-" + "i" * int(m[1]), s)
 
 
-item_by_name = {lure_key(i["name"]): i["id"] for i in items}
+# Some baits share their name with food or a gathered plant ("Хлеб", "Кукуруза");
+# the bait kinds win.
+BAIT_KINDS = {10, 11, 12}
+item_by_name = {}
+for i in items:
+    key = lure_key(i["name"])
+    if key not in item_by_name or i["kind"] in BAIT_KINDS:
+        item_by_name[key] = i["id"]
 
 
 def bait_tid(name):
