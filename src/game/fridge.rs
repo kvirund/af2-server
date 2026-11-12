@@ -1,8 +1,9 @@
 //! The fridge: fish kept on ice at a base, away from the keepnet.
 //!
-//! A click on a fridge in the scene sends 108 with the object's own number
-//! (0 in the bases, 1 for the doctor's in Убежище). Case 166 opens the window:
-//! int fridge, int places, then fish records until the end. The window shows
+//! A click on a fridge in the scene sends 166 with the object's own number
+//! (0 in the bases, 1 for the doctor's in Убежище) and raises the black
+//! overlay. Case 166 back opens the window: int fridge, int places, then fish
+//! records until the end. The window shows
 //! the keepnet in use on the left and the fridge on the right; its two buttons
 //! move the selected fish and send 167 (into the fridge) or 168 (out of it),
 //! both int fridge and long fish. The client moves the fish itself and ignores
@@ -65,7 +66,7 @@ fn here(conn: &Conn, player: &Player, fridge: i32) -> Option<i32> {
     }
 }
 
-/// Client 108: int the object's number. Answers 166 with the base's fridge.
+/// Client 166: int the object's number. Answers 166 with the base's fridge.
 pub async fn open(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
     let object = message.reader().int32()?;
     let player = active(&mut session.player)?;
@@ -83,7 +84,8 @@ pub async fn open(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         keepnet::write_fish(&mut w, &shown, &settings.fishing.mutant_species);
         count += 1;
     }
-    conn.send(msg::FRIDGE_WINDOW, w.finish()).await?;
+    conn.send(msg::FRIDGE, w.finish()).await?;
+    conn.clear_overlay().await?;
     if is_open(&settings.fridge, &player.data, base) {
         conn.log(&format!("   -> 166 fridge {object} at base {base}: {count} of {places} places"));
     } else {

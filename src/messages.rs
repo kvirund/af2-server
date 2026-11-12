@@ -6,8 +6,8 @@ pub const NPC_TALK: i32 = 60;
 pub const DIALOG_ANSWER: i32 = 65;
 /// Dialog text: string what to replace, string with what.
 pub const DIALOG_REPLACE: i32 = 78;
-pub const FRIDGE_OPEN: i32 = 108;
-pub const FRIDGE_WINDOW: i32 = 166;
+/// The client asks with the fridge object's number and gets the window back.
+pub const FRIDGE: i32 = 166;
 pub const FRIDGE_PUT: i32 = 167;
 pub const FRIDGE_TAKE: i32 = 168;
 pub const DIALOG_TEXT: i32 = 70;

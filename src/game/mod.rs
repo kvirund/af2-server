@@ -184,7 +184,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::FISH_TO_SPARE | msg::FISH_TO_IN_USE => keepnet::move_between_lists(session, message).await,
         msg::FISH_RELEASE => keepnet::release(session, message).await,
         msg::FISH_SWAP_KEEPNETS => keepnet::swap_keepnets(session).await,
-        msg::FRIDGE_OPEN => fridge::open(session, message).await,
+        msg::FRIDGE => fridge::open(session, message).await,
         msg::FRIDGE_PUT | msg::FRIDGE_TAKE => fridge::transfer(session, message).await,
         // The doctor talks; of the rest only the NPCs listed in fishMarket.buyers
         // trade fish, and the others' windows are still to do.
