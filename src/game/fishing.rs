@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, character, keepnet, inventory, loot, vitals, perks};
+use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
@@ -223,7 +223,10 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     };
     let max_grams = tackle_limit(&world.catalog, &player.data.items, bait_id, settings.tackle_weight_factor);
     let conditions = Conditions { bait, min_grams, max_grams, depth, bottom, night: is_night(settings) };
-    let options = candidates(&world.fish, settings, player.location, &conditions);
+    let mut options = candidates(&world.fish, settings, player.location, &conditions);
+    for (species, weight) in &mut options {
+        *weight *= cards::bite_factor(&world.settings.mastery, &player.data.catches, species.id);
+    }
     let total: f64 = options.iter().map(|(_, weight)| weight).sum();
     let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
 

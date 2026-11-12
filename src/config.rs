@@ -383,6 +383,9 @@ pub struct Price {
 pub struct MasterySettings {
     /// Fish of the species landed for each wreath, in order.
     pub catches: Vec<i64>,
+    /// How much more often a species bites per wreath, in percent.
+    #[serde(default)]
+    pub bite_percent: f64,
 }
 
 /// Fish kept on ice, one fridge per base.

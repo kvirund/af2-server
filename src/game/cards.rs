@@ -8,6 +8,8 @@
 //! bait. The client draws the bait's icon, so it must be a real item. With
 //! nobody else on this server the records are the character's own.
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 
 use super::{Outcome, Session, active, travel};
@@ -27,6 +29,13 @@ pub fn mastery(settings: &MasterySettings, landed: i64) -> (i32, f32) {
         from = to;
     }
     (settings.catches.len() as i32, 100.0)
+}
+
+/// Each wreath makes its species bite a little more often.
+pub fn bite_factor(settings: &MasterySettings, catches: &BTreeMap<i32, Catches>, species: i32) -> f64 {
+    let landed = catches.get(&species).map_or(0, |catches| catches.count);
+    let (wreaths, _) = mastery(settings, landed);
+    1.0 + settings.bite_percent / 100.0 * f64::from(wreaths)
 }
 
 /// Records kept before fish were counted say that at least one was landed.
@@ -80,12 +89,21 @@ mod tests {
 
     #[test]
     fn wreaths_follow_the_fish_landed() {
-        let settings = MasterySettings { catches: vec![50, 200, 500] };
+        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0 };
         assert_eq!(mastery(&settings, 0), (0, 0.0));
         assert_eq!(mastery(&settings, 25), (0, 50.0));
         assert_eq!(mastery(&settings, 50), (1, 0.0));
         assert_eq!(mastery(&settings, 125), (1, 50.0));
         assert_eq!(mastery(&settings, 900), (3, 100.0));
+    }
+
+    #[test]
+    fn each_wreath_adds_to_the_bite() {
+        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0 };
+        let mut catches = BTreeMap::new();
+        catches.insert(5, Catches { count: 250, grams: 0 });
+        assert!((bite_factor(&settings, &catches, 5) - 1.06).abs() < 1e-9);
+        assert_eq!(bite_factor(&settings, &catches, 7), 1.0);
     }
 
     #[test]
