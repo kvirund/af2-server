@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::{Outcome, Session, active, character, inventory, keepnet, perks, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::Recipe;
+use crate::config::{CatalogItem, Recipe};
 use crate::messages as msg;
 use crate::storage::{CaughtFish, CharacterData};
 
@@ -38,6 +38,18 @@ fn taught_by(xml: &str) -> Option<(i32, i32)> {
     let (_, rest) = xml.split_once("<basePar>")?;
     let mut fields = rest.split('<').next()?.split('/').skip(1);
     Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+}
+
+/// A recipe item whose recipe the character already has for good, or always
+/// had: learning it would teach nothing.
+pub fn teaches_nothing_new(recipes: &[Recipe], character: &CharacterData, item: &CatalogItem) -> bool {
+    if item.kind != RECIPE_KIND {
+        return false;
+    }
+    let Some(recipe) = taught_by(&item.xml).and_then(|(recipe, _)| recipes.iter().find(|one| one.id == recipe)) else {
+        return false;
+    };
+    recipe.default || character.known_recipes.get(&recipe.id) == Some(&UNLIMITED)
 }
 
 /// Learning a limited recipe again adds its uses.
@@ -384,6 +396,29 @@ mod tests {
             profession_level: 0,
             ingredients: vec![[1035.0, 1.0, 0.0, 0.0, 0.0, 0.0]],
         }
+    }
+
+    #[test]
+    fn a_recipe_known_for_good_teaches_nothing_new() {
+        let item = |uses: i32| CatalogItem {
+            id: 1144,
+            kind: RECIPE_KIND,
+            cost: 10,
+            durability: 1.0,
+            stacks: false,
+            shop_count: 1,
+            max_count: 1,
+            xml: format!("<base><basePar>3/142/{uses}</basePar></base>"),
+        };
+        let recipes = [recipe(3, 0)];
+        let mut character = CharacterData::default();
+        assert!(!teaches_nothing_new(&recipes, &character, &item(-1)));
+        character.known_recipes.insert(142, 3);
+        assert!(!teaches_nothing_new(&recipes, &character, &item(10)));
+        character.known_recipes.insert(142, UNLIMITED);
+        assert!(teaches_nothing_new(&recipes, &character, &item(10)));
+        let always = [Recipe { default: true, ..recipe(3, 0) }];
+        assert!(teaches_nothing_new(&always, &CharacterData::default(), &item(-1)));
     }
 
     #[test]

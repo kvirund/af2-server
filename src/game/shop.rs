@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, character, inventory, travel};
+use super::{Conn, Outcome, Player, Session, active, character, crafting, inventory, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{CatalogItem, ShopSettings};
 use crate::messages as msg;
@@ -27,10 +27,12 @@ fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool
 fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
     let world = &conn.world;
     let base = travel::current_base(&world.settings, player);
-    match world.settings.shop.stocked(base) {
+    let stock: Vec<&CatalogItem> = match world.settings.shop.stocked(base) {
         Some(ids) => ids.iter().filter_map(|id| world.catalog.get(*id)).filter(|item| item.cost > 0).collect(),
         None => world.catalog.for_sale().collect(),
-    }
+    };
+    // Recipes the character knows for good are left out: the client cannot say so.
+    stock.into_iter().filter(|item| !crafting::teaches_nothing_new(&world.recipes, &player.data, item)).collect()
 }
 
 fn digits_as_numbers(text: &str) -> Vec<i32> {
