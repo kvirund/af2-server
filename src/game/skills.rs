@@ -9,7 +9,7 @@ use std::collections::btree_map::Entry;
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, inventory, perks};
+use super::{Conn, Outcome, Player, Session, active, fridge, inventory, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{SkillSettings, SkillTree};
 use crate::messages as msg;
@@ -183,6 +183,13 @@ pub async fn study_course(session: &mut Session, message: &AfcMessage) -> Result
         conn.log(&format!("   course: character has no item {id}"));
         return Ok(Outcome::Unanswered);
     };
+    if template == settings.fridge.card {
+        // The card is read like a course, with the same bar.
+        let base = fridge::use_card(settings, player);
+        inventory::use_piece(conn, player, id).await?;
+        conn.log(&format!("   fridge card read at base {base}"));
+        return Ok(Outcome::Answered);
+    }
     let Some(item) = world.catalog.get(template).filter(|item| item.kind == COURSE_KIND) else {
         conn.log(&format!("   course: item {template} is not a course"));
         return Ok(Outcome::Unanswered);
