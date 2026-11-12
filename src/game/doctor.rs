@@ -1,4 +1,5 @@
-//! Доктор Григорий: heals once an hour for a fish, up to a level.
+//! Доктор Григорий: heals once an hour for a fish, up to a level, and lets the
+//! character use his fridge for biomass, then sells fridge cards for mutomass.
 //!
 //! The window is the client's quest dialog. Case 70 loads `quests/{file}.lng`
 //! and shows its text `n{node}`, each case 72 adds the answer `a{id}`, and case
@@ -8,19 +9,31 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeDelta};
 
-use super::{Conn, Outcome, Player, Session, active, inventory, keepnet, travel, vitals};
+use super::{Conn, Outcome, Player, Session, active, fridge, inventory, keepnet, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::DoctorSettings;
+use crate::config::{DoctorSettings, Price};
 use crate::messages as msg;
 use crate::storage::CaughtFish;
 
 const GREETING: i32 = 1;
 const TERMS: i32 = 2;
+const WANTS_BIOMASS: i32 = 3;
+const CARD: i32 = 4;
+const WANTS_MUTOMASS: i32 = 5;
 
 const DECLINE: i32 = 1;
 const ASK: i32 = 2;
 const GIVE_FISH: i32 = 3;
 const UNDERSTOOD: i32 = 4;
+const ASK_STORE: i32 = 5;
+const ACCEPTED: i32 = 6;
+const GIVE_BIOMASS: i32 = 7;
+const THANKS: i32 = 8;
+const ASK_MORE: i32 = 9;
+const GIVE_MUTOMASS: i32 = 10;
+
+/// What the texts with a count of things carried show it as.
+const COUNT_MARK: &str = "[cnt]";
 
 /// The fish the doctor gets: the lightest one in the keepnet heavy enough.
 fn payment(fish: &[CaughtFish], min_grams: i32) -> Option<&CaughtFish> {
@@ -98,6 +111,57 @@ async fn terms(conn: &Conn, player: &mut Player, doctor: &DoctorSettings) -> Res
     open(conn, player, doctor.npc).await
 }
 
+/// Case 78 replaces a mark in the text shown last.
+async fn replace(conn: &Conn, mark: &str, with: &str) -> Result<()> {
+    let mut w = AfcWriter::new();
+    w.string(mark).string(with);
+    conn.send(msg::DIALOG_REPLACE, w.finish()).await
+}
+
+/// Nodes 3 and 5: what the doctor wants, how much the character carries, and
+/// the answer that gives it when there is enough.
+async fn wants(conn: &Conn, player: &mut Player, doctor: &DoctorSettings, node: i32, price: &Price, give: i32) -> Result<()> {
+    let carried = inventory::pieces_carried(&player.data, price.item);
+    text(conn, doctor.npc, node).await?;
+    replace(conn, COUNT_MARK, &carried.to_string()).await?;
+    if carried >= price.count {
+        option(conn, doctor.npc, node, give, 0).await?;
+    }
+    option(conn, doctor.npc, node, UNDERSTOOD, 0).await?;
+    open(conn, player, doctor.npc).await
+}
+
+/// Takes the price, hands over a fridge card and shows node 4 with `reply`.
+/// `false` if the character no longer has enough or has no room for the card.
+async fn sell_card(conn: &Conn, player: &mut Player, doctor: &DoctorSettings, price: &Price, reply: i32) -> Result<bool> {
+    let settings = &conn.world.settings;
+    let Some(card) = conn.world.catalog.get(settings.fridge.card) else {
+        conn.log(&format!("   fridge card {} is not in the catalog", settings.fridge.card));
+        return Ok(false);
+    };
+    if let Err(error) = inventory::plan_pieces(&settings.bags, &player.data, card, 1) {
+        conn.log(&format!("   no room for the fridge card: {}", error.status()));
+        return Ok(false);
+    }
+    let Some((smaller, gone)) = inventory::take_carried(&mut player.data, price.item, price.count) else {
+        return Ok(false);
+    };
+    let (mut changed, gained) = give_gifts(conn, player, &[conn.world.settings.fridge.card]).await?;
+    changed.extend(smaller);
+    conn.save(player).await?;
+    for id in gone {
+        inventory::send_removed(conn, id).await?;
+    }
+    inventory::send_updates(conn, player.data.id, &changed).await?;
+    if !gained.is_empty() {
+        conn.send(msg::ITEMS_GAINED, gained).await?;
+    }
+    text(conn, doctor.npc, CARD).await?;
+    option(conn, doctor.npc, CARD, reply, 0).await?;
+    open(conn, player, doctor.npc).await?;
+    Ok(true)
+}
+
 /// One piece of each gift: the changed cells and the case 125 that announces them.
 async fn give_gifts(conn: &Conn, player: &mut Player, gifts: &[i32]) -> Result<(Vec<crate::storage::ItemEntry>, Vec<u8>)> {
     let mut changed = Vec::new();
@@ -131,6 +195,8 @@ pub async fn talk(session: &mut Session, message: &AfcMessage) -> Result<Option<
     }
     text(conn, doctor.npc, GREETING).await?;
     option(conn, doctor.npc, GREETING, ASK, 0).await?;
+    let fridge = if fridge::quest_value(&player.data, fridge::DOCTOR_ALLOWS) > 0 { ASK_MORE } else { ASK_STORE };
+    option(conn, doctor.npc, GREETING, fridge, 0).await?;
     option(conn, doctor.npc, GREETING, DECLINE, 0).await?;
     open(conn, player, doctor.npc).await?;
     conn.log("   -> 70/72/74 doctor's greeting");
@@ -189,6 +255,26 @@ pub async fn answer(session: &mut Session, message: &AfcMessage) -> Result<Outco
                 _ => conn.log(&format!("   doctor: fish {param} not accepted")),
             }
             terms(conn, player, doctor).await?;
+        }
+        ASK_STORE => wants(conn, player, doctor, WANTS_BIOMASS, &doctor.fridge_unlock, GIVE_BIOMASS).await?,
+        ASK_MORE => wants(conn, player, doctor, WANTS_MUTOMASS, &doctor.fridge_card, GIVE_MUTOMASS).await?,
+        GIVE_BIOMASS if fridge::quest_value(&player.data, fridge::DOCTOR_ALLOWS) == 0 => {
+            player.data.quest_values.insert(fridge::DOCTOR_ALLOWS.into(), 1);
+            if sell_card(conn, player, doctor, &doctor.fridge_unlock, ACCEPTED).await? {
+                conn.log("   doctor opened his fridge for biomass");
+            } else {
+                player.data.quest_values.remove(fridge::DOCTOR_ALLOWS);
+                conn.log("   doctor: biomass not taken");
+                wants(conn, player, doctor, WANTS_BIOMASS, &doctor.fridge_unlock, GIVE_BIOMASS).await?;
+            }
+        }
+        GIVE_MUTOMASS => {
+            if sell_card(conn, player, doctor, &doctor.fridge_card, THANKS).await? {
+                conn.log("   doctor gave a fridge card for mutomass");
+            } else {
+                conn.log("   doctor: mutomass not taken");
+                wants(conn, player, doctor, WANTS_MUTOMASS, &doctor.fridge_card, GIVE_MUTOMASS).await?;
+            }
         }
         _ => close(conn, player, file).await?,
     }

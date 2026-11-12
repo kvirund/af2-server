@@ -245,6 +245,45 @@ pub fn take_pieces(character: &mut CharacterData, id: i64, amount: i32) -> Optio
     }
 }
 
+/// Pieces of one item the character carries, storage and gear left out.
+pub fn pieces_carried(character: &CharacterData, template: i32) -> i32 {
+    character
+        .items
+        .iter()
+        .filter(|item| item.template == template && item.bag < FIRST_NON_INVENTORY_BAG)
+        .map(|item| item.count)
+        .sum()
+}
+
+/// Takes pieces of one item out of the carried stacks, first stacks first.
+/// Returns the stacks left smaller and the ids of those used up, or `None`
+/// with nothing taken if there are too few.
+pub fn take_carried(character: &mut CharacterData, template: i32, amount: i32) -> Option<(Vec<ItemEntry>, Vec<i64>)> {
+    if pieces_carried(character, template) < amount {
+        return None;
+    }
+    let stacks: Vec<(i64, i32)> = character
+        .items
+        .iter()
+        .filter(|item| item.template == template && item.bag < FIRST_NON_INVENTORY_BAG)
+        .map(|item| (item.id, item.count))
+        .collect();
+    let (mut changed, mut gone, mut left) = (Vec::new(), Vec::new(), amount);
+    for (id, count) in stacks {
+        if left == 0 {
+            break;
+        }
+        let part = left.min(count);
+        left -= part;
+        match take_from_stack(true, character, id, part) {
+            Used::Left(item) => changed.push(item),
+            Used::Gone => gone.push(id),
+            Used::NotAStack => {}
+        }
+    }
+    Some((changed, gone))
+}
+
 /// Spends one piece of any item, single ones included.
 pub async fn use_piece(conn: &Conn, player: &mut Player, id: i64) -> Result<()> {
     match take_from_stack(true, &mut player.data, id, 1) {
@@ -759,5 +798,17 @@ mod tests {
         }
         assert_eq!(separate_shared_cells(&bags(), &mut character, info), 1);
         assert_eq!((character.items[1].bag, character.items[1].cell), (52, 1));
+    }
+
+    #[test]
+    fn pieces_are_taken_across_carried_stacks_but_not_from_storage() {
+        let stack = |id, bag, count| ItemEntry { id, bag, cell: id as i32, count, durability: 1.0, template: 1167 };
+        let mut character = CharacterData { items: vec![stack(1, 1, 3), stack(2, 52, 10), stack(3, 2, 4)], ..Default::default() };
+        assert_eq!(pieces_carried(&character, 1167), 7);
+        assert_eq!(take_carried(&mut character, 1167, 8), None);
+        let (smaller, gone) = take_carried(&mut character, 1167, 5).unwrap();
+        assert_eq!(gone, vec![1]);
+        assert_eq!(smaller.iter().map(|item| (item.id, item.count)).collect::<Vec<_>>(), vec![(3, 2)]);
+        assert_eq!(pieces_carried(&character, 1167), 2);
     }
 }

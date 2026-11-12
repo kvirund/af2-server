@@ -14,6 +14,11 @@ use crate::storage::CaughtFish;
 
 pub const IN_USE_LIST: i32 = 0;
 const SPARE_LIST: i32 = 1;
+
+/// In one of the two keepnets rather than on ice in a fridge.
+pub fn in_keepnet(fish: &CaughtFish) -> bool {
+    fish.list == IN_USE_LIST || fish.list == SPARE_LIST
+}
 const CLOTHING_BAG: i32 = 60;
 const IN_USE_CELL: i32 = 6;
 const SPARE_CELL: i32 = 8;
@@ -36,7 +41,7 @@ pub fn write_fish(w: &mut AfcWriter, fish: &CaughtFish, mutants: &[i32]) {
 pub async fn send_all(conn: &Conn, player: &Player) -> Result<()> {
     conn.send(msg::FISH_LIST_CLEAR, Vec::new()).await?;
     let mut w = AfcWriter::new();
-    for fish in &player.data.fish {
+    for fish in player.data.fish.iter().filter(|fish| in_keepnet(fish)) {
         write_fish(&mut w, fish, &conn.world.settings.fishing.mutant_species);
     }
     conn.send(msg::FISH_LIST, w.finish()).await
@@ -98,7 +103,7 @@ pub async fn swap_keepnets(session: &mut Session) -> Result<Outcome> {
     if let Some(changed) = inventory::swap(&mut player.data, in_use, spare) {
         inventory::send_updates(conn, player.data.id, &changed).await?;
     }
-    for fish in &mut player.data.fish {
+    for fish in player.data.fish.iter_mut().filter(|fish| in_keepnet(fish)) {
         fish.list = if fish.list == IN_USE_LIST { SPARE_LIST } else { IN_USE_LIST };
     }
     conn.save(player).await?;

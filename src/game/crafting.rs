@@ -6,7 +6,7 @@ use rand::random;
 
 use std::collections::HashMap;
 
-use super::{Outcome, Session, active, character, inventory, perks, vitals};
+use super::{Outcome, Session, active, character, inventory, keepnet, perks, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::Recipe;
 use crate::messages as msg;
@@ -198,7 +198,7 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) 
             let mut fitting: Vec<&CaughtFish> = character
                 .fish
                 .iter()
-                .filter(|fish| !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max, mutants))
+                .filter(|fish| keepnet::in_keepnet(fish) && !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max, mutants))
                 .collect();
             if fitting.len() < need as usize {
                 return None;

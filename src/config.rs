@@ -335,6 +335,7 @@ pub struct Settings {
     pub gathering: GatheringSettings,
     pub skills: SkillSettings,
     pub doctor: DoctorSettings,
+    pub fridge: FridgeSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
@@ -360,6 +361,31 @@ pub struct DoctorSettings {
     /// Items handed over with each treatment, one piece each.
     #[serde(default)]
     pub gifts: Vec<i32>,
+    /// What the doctor wants for opening the fridge at his base.
+    pub fridge_unlock: Price,
+    /// What he wants for each fridge card after that.
+    pub fridge_card: Price,
+}
+
+/// Pieces of one item.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Price {
+    pub item: i32,
+    pub count: i32,
+}
+
+/// Fish kept on ice, one fridge per base.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FridgeSettings {
+    /// Places in a fridge before any card is used.
+    pub cells: i32,
+    /// The card that adds a place to the fridge of the base it is used at.
+    pub card: i32,
+    /// Bases whose fridge stays shut until the doctor opens it.
+    #[serde(default)]
+    pub doctor_bases: Vec<i32>,
 }
 
 /// Studying skills. The cost of a level comes from the game's own tree.
