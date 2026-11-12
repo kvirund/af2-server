@@ -336,6 +336,8 @@ pub struct Settings {
     pub skills: SkillSettings,
     pub doctor: DoctorSettings,
     pub fridge: FridgeSettings,
+    #[serde(default)]
+    pub mastery: MasterySettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
@@ -373,6 +375,14 @@ pub struct DoctorSettings {
 pub struct Price {
     pub item: i32,
     pub count: i32,
+}
+
+/// Wreaths for landing many fish of one species, shown in the statistics.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasterySettings {
+    /// Fish of the species landed for each wreath, in order.
+    pub catches: Vec<i64>,
 }
 
 /// Fish kept on ice, one fridge per base.

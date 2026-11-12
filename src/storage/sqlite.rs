@@ -5,12 +5,17 @@ use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use sqlx::{Sqlite, Transaction};
 
-use super::{CaughtFish, CharacterData, CharacterSummary, ItemEntry, Skill, Storage, UNKNOWN_BAIT, Vitals};
+use super::{Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, UNKNOWN_BAIT, Vitals};
 
 const MAX_CONNECTIONS: u32 = 4;
 
 /// `schema.sql` only creates missing tables, so a column added later needs this.
+/// A table that is not there is left alone.
 async fn add_column(pool: &SqlitePool, table: &str, column: &str, declaration: &str) -> Result<()> {
+    let exists = format!("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '{table}'");
+    if sqlx::query_as::<_, (i64,)>(&exists).fetch_optional(pool).await?.is_none() {
+        return Ok(());
+    }
     let info = format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'");
     let found: Option<(i64,)> = sqlx::query_as(&info).fetch_optional(pool).await?;
     if found.is_none() {
@@ -28,6 +33,8 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     }
     add_column(pool, "characters", "studying", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "characters", "healed_at", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "records", "location", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "records", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
     Ok(())
 }
 
@@ -90,11 +97,22 @@ impl SqliteStorage {
                 .execute(&mut **transaction)
                 .await?;
         }
-        for (species, grams) in &character.records {
-            sqlx::query("INSERT INTO records (character_id, species, grams) VALUES (?, ?, ?)")
+        for (species, record) in &character.records {
+            sqlx::query("INSERT INTO records (character_id, species, grams, location, bait) VALUES (?, ?, ?, ?, ?)")
                 .bind(id)
                 .bind(species)
-                .bind(grams)
+                .bind(record.grams)
+                .bind(record.location)
+                .bind(record.bait)
+                .execute(&mut **transaction)
+                .await?;
+        }
+        for (species, catches) in &character.catches {
+            sqlx::query("INSERT INTO catches (character_id, species, count, grams) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind(species)
+                .bind(catches.count)
+                .bind(catches.grams)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -212,8 +230,14 @@ impl Storage for SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
 
-        let records: Vec<(i32, i32)> =
-            sqlx::query_as("SELECT species, grams FROM records WHERE character_id = ?")
+        let records: Vec<(i32, i32, i32, i32)> =
+            sqlx::query_as("SELECT species, grams, location, bait FROM records WHERE character_id = ?")
+                .bind(id)
+                .fetch_all(&self.pool)
+                .await?;
+
+        let catches: Vec<(i32, i64, i64)> =
+            sqlx::query_as("SELECT species, count, grams FROM catches WHERE character_id = ?")
                 .bind(id)
                 .fetch_all(&self.pool)
                 .await?;
@@ -275,7 +299,11 @@ impl Storage for SqliteStorage {
                     experience,
                 })
                 .collect(),
-            records: records.into_iter().collect(),
+            records: records
+                .into_iter()
+                .map(|(species, grams, location, bait)| (species, Record { grams, location, bait }))
+                .collect(),
+            catches: catches.into_iter().map(|(species, count, grams)| (species, Catches { count, grams })).collect(),
             bag_extra: bag_extra.into_iter().collect(),
             known_recipes: known_recipes.into_iter().collect(),
             skills: skills.into_iter().map(|(perk, level, experience)| (perk, Skill { level, experience })).collect(),
@@ -305,7 +333,7 @@ impl Storage for SqliteStorage {
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
-        for table in ["items", "fish", "records", "bag_extra", "known_recipes", "skills", "quest_values"] {
+        for table in ["items", "fish", "records", "catches", "bag_extra", "known_recipes", "skills", "quest_values"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE character_id = ?"))
                 .bind(character.id)
                 .execute(&mut *transaction)
@@ -362,7 +390,8 @@ mod tests {
             fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12 }],
             ..Default::default()
         };
-        character.records.insert(7, 300);
+        character.records.insert(7, Record { grams: 300, location: 4, bait: 1016 });
+        character.catches.insert(7, Catches { count: 3, grams: 700 });
         character.bag_extra.insert(52, 5);
         character.known_recipes.insert(142, 10);
         character.skills.insert(100, Skill { level: 2, experience: 150.5 });

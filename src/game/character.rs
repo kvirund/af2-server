@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, inventory, keepnet, panels, perks, skills, travel, vitals};
+use super::{Account, Conn, Outcome, Player, Session, cards, inventory, keepnet, panels, perks, skills, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -149,9 +149,12 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
         })
     };
     let separated = inventory::separate_shared_cells(&world.settings.bags, &mut player.data, info);
-    if moved > 0 || separated > 0 {
+    let counted = cards::count_old_records(&mut player.data);
+    if moved > 0 || separated > 0 || counted > 0 {
         session.conn.save(player).await?;
-        session.conn.log(&format!("   moved {moved} items from the old backpack onto pages, {separated} out of shared cells"));
+        session.conn.log(&format!(
+            "   moved {moved} items from the old backpack onto pages, {separated} out of shared cells; {counted} old records counted as caught"
+        ));
     }
 
     let start_base = world.settings.character.start_base;

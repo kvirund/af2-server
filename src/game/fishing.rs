@@ -14,7 +14,7 @@ use super::{Bite, Outcome, Session, active, character, keepnet, inventory, loot,
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
-use crate::storage::{CaughtFish, ItemEntry, UNKNOWN_BAIT};
+use crate::storage::{CaughtFish, ItemEntry, Record, UNKNOWN_BAIT};
 
 pub const DEFAULT_LOCATION: i32 = 4;
 
@@ -302,7 +302,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         list: keepnet::IN_USE_LIST,
         experience: experience_for(progression, bite.grams, bite.size_class, education),
     };
-    let is_record = bite.grams > player.data.records.get(&bite.species).copied().unwrap_or(0);
+    let is_record = bite.grams > player.data.records.get(&bite.species).map_or(0, |record| record.grams);
     let shown = if is_record { fish.experience * progression.record_experience_factor } else { fish.experience };
 
     let mut w = AfcWriter::new();
@@ -315,6 +315,9 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let effort = &conn.world.settings.vitals;
     vitals::tire(player, effort.stamina_per_fish + effort.stamina_per_kg * fish.grams as f32 / 1000.0);
     vitals::reward_catch(effort, player, fish.grams);
+    let catches = player.data.catches.entry(fish.species).or_default();
+    catches.count += 1;
+    catches.grams += i64::from(fish.grams);
     player.landed.insert(fish.id, fish);
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
     loot::after_catch(conn, player).await?;
@@ -332,9 +335,10 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         return Ok(Outcome::Unanswered);
     };
 
-    let is_record = fish.grams > player.data.records.get(&fish.species).copied().unwrap_or(0);
+    let is_record = fish.grams > player.data.records.get(&fish.species).map_or(0, |record| record.grams);
     if is_record {
-        player.data.records.insert(fish.species, fish.grams);
+        let record = Record { grams: fish.grams, location: player.location, bait: fish.bait };
+        player.data.records.insert(fish.species, record);
         let mut w = AfcWriter::new();
         w.int32(fish.species).int32(fish.grams).int32(0);
         conn.send(msg::PERSONAL_RECORD, w.finish()).await?;

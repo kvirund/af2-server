@@ -37,6 +37,22 @@ pub struct CaughtFish {
     pub experience: i32,
 }
 
+/// The heaviest fish of a species kept, and where and on what it was caught.
+/// Records from before the place was kept have location 0 and the unknown bait.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Record {
+    pub grams: i32,
+    pub location: i32,
+    pub bait: i32,
+}
+
+/// How many fish of a species were landed and their weight together.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Catches {
+    pub count: i64,
+    pub grams: i64,
+}
+
 /// Life, stamina, radiation resistance, food and water, plus work points.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vitals {
@@ -63,8 +79,10 @@ pub struct CharacterData {
     pub premium: i64,
     pub items: Vec<ItemEntry>,
     pub fish: Vec<CaughtFish>,
-    /// Heaviest fish kept, in grams, by species id.
-    pub records: HashMap<i32, i32>,
+    /// Heaviest fish kept, by species id.
+    pub records: HashMap<i32, Record>,
+    /// Fish landed, by species id.
+    pub catches: BTreeMap<i32, Catches>,
     /// Cells bought on top of the starting size, by bag.
     pub bag_extra: HashMap<i32, i32>,
     /// Uses left of each learned recipe, negative meaning no limit.

@@ -47,6 +47,16 @@ CREATE TABLE IF NOT EXISTS records (
     character_id INTEGER NOT NULL REFERENCES characters (id),
     species INTEGER NOT NULL,
     grams INTEGER NOT NULL,
+    location INTEGER NOT NULL DEFAULT 0,
+    bait INTEGER NOT NULL DEFAULT 1010,
+    PRIMARY KEY (character_id, species)
+);
+
+CREATE TABLE IF NOT EXISTS catches (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    species INTEGER NOT NULL,
+    count INTEGER NOT NULL,
+    grams INTEGER NOT NULL,
     PRIMARY KEY (character_id, species)
 );
 

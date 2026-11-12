@@ -1,6 +1,7 @@
 //! Game rules, one file per system. Handlers run on the connection's own task
 //! and own the character they change.
 
+mod cards;
 mod character;
 mod crafting;
 mod doctor;
@@ -194,7 +195,9 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         },
         msg::DIALOG_ANSWER => doctor::answer(session, message).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,
-        id @ (msg::STATISTICS | msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
+        msg::STATISTICS => cards::statistics(session).await,
+        msg::RECORDS if matches!(message.reader().int32(), Ok(0)) => cards::records(session).await,
+        id @ (msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }
         msg::PERKS => perks::window(session).await,
