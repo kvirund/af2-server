@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
-use af2_server::files::read_commented;
+use af2_server::files::{read_commented, read_commented_with_local};
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
@@ -535,7 +535,7 @@ pub struct GameData {
 }
 
 pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
-    let mut settings: Settings = read_commented(&config_dir.join("settings.json"))?;
+    let mut settings: Settings = read_commented_with_local(&config_dir.join("settings.json"))?;
     if settings.shop.guide_stock {
         settings.shop.stock = read_commented(&config_dir.join("shops.json"))?;
     }

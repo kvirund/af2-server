@@ -9,6 +9,7 @@ tests/*/obj/
 data/
 
 # Local state
+config/*.local.json
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
