@@ -357,6 +357,9 @@ pub struct DoctorSettings {
     pub radiation: f32,
     pub food: f32,
     pub water: f32,
+    /// Items handed over with each treatment, one piece each.
+    #[serde(default)]
+    pub gifts: Vec<i32>,
 }
 
 /// Studying skills. The cost of a level comes from the game's own tree.

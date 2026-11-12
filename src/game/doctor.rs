@@ -8,7 +8,7 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeDelta};
 
-use super::{Conn, Outcome, Player, Session, active, keepnet, travel, vitals};
+use super::{Conn, Outcome, Player, Session, active, inventory, keepnet, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::DoctorSettings;
 use crate::messages as msg;
@@ -98,6 +98,28 @@ async fn terms(conn: &Conn, player: &mut Player, doctor: &DoctorSettings) -> Res
     open(conn, player, doctor.npc).await
 }
 
+/// One piece of each gift: the changed cells and the case 125 that announces them.
+async fn give_gifts(conn: &Conn, player: &mut Player, gifts: &[i32]) -> Result<(Vec<crate::storage::ItemEntry>, Vec<u8>)> {
+    let mut changed = Vec::new();
+    let mut gained = AfcWriter::new();
+    let mut any = false;
+    for template in gifts {
+        let Some(item) = conn.world.catalog.get(*template) else {
+            conn.log(&format!("   doctor's gift {template} is not in the catalog"));
+            continue;
+        };
+        match inventory::give(conn, player, item, 1).await? {
+            Ok(entries) => {
+                changed.extend(entries);
+                gained.int32(*template).int32(1).int32(0);
+                any = true;
+            }
+            Err(error) => conn.log(&format!("   doctor's gift {template} lost: {}", error.status())),
+        }
+    }
+    Ok((changed, if any { gained.finish() } else { Vec::new() }))
+}
+
 /// Client 60 for the doctor. `None` leaves the NPC to the others.
 pub async fn talk(session: &mut Session, message: &AfcMessage) -> Result<Option<Outcome>> {
     let npc = message.reader().int64()?;
@@ -152,7 +174,12 @@ pub async fn answer(session: &mut Session, message: &AfcMessage) -> Result<Outco
                     let fish = player.data.fish.remove(index);
                     player.data.healed_at = Local::now().timestamp();
                     vitals::heal(settings, &conn.world.catalog, &mut player.data, doctor);
+                    let gifts = give_gifts(conn, player, &doctor.gifts).await?;
                     conn.save(player).await?;
+                    inventory::send_updates(conn, player.data.id, &gifts.0).await?;
+                    if !gifts.1.is_empty() {
+                        conn.send(msg::ITEMS_GAINED, gifts.1).await?;
+                    }
                     let mut w = AfcWriter::new();
                     w.int64(fish.id);
                     conn.send(msg::FISH_REMOVE, w.finish()).await?;
