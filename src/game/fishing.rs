@@ -167,6 +167,20 @@ fn bait_min_grams(xml: &str) -> f64 {
     class.and_then(|class| BAIT_MIN_GRAMS.get(class).copied()).unwrap_or(0.0)
 }
 
+/// The bait's attractiveness, the first number of its `basePar`, as a share of
+/// the normal 100.
+fn attractiveness(xml: &str) -> f64 {
+    xml.split_once("<basePar>")
+        .and_then(|(_, rest)| rest.split(['/', '<']).next())
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .map_or(1.0, |value| value / 100.0)
+}
+
+/// The bite chance with the bait's attractiveness applied.
+fn attracted(settings: &FishingSettings, chance: f64, attractiveness: f64) -> f64 {
+    (chance * (1.0 + settings.bait_attraction * (attractiveness - 1.0))).clamp(0.0, 1.0)
+}
+
 /// Returns grams and size class for two rolls in `0..1`.
 fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
     let trophy_share = luck
@@ -228,7 +242,9 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         *weight *= cards::bite_factor(&world.settings.mastery, &player.data.catches, species.id);
     }
     let total: f64 = options.iter().map(|(_, weight)| weight).sum();
+    let bait_item = bait.and_then(|template| world.catalog.get(template));
     let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
+    let chance = attracted(settings, chance, bait_item.map_or(1.0, |item| attractiveness(&item.xml)));
 
     let mut w = AfcWriter::new();
     if options.is_empty() || random::<f64>() >= chance {
@@ -373,6 +389,7 @@ mod tests {
             small_fish_nibble_share: 0.0,
             bait_per_catch: 1,
             full_bite_weight: 8.0,
+            bait_attraction: 1.0,
             large_share: 0.3,
             trophy_share: 0.1,
             trophy_depth_cm: 300.0,
@@ -515,5 +532,18 @@ mod tests {
         let table = FishTable::for_tests(vec![species()], 4);
         let conditions = Conditions { bait: Some(1010), min_grams: 0.0, max_grams: 50.0, depth: 50.0, bottom: 100.0, night: false };
         assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
+    }
+
+    #[test]
+    fn attractive_bait_bites_more_often() {
+        assert_eq!(attractiveness("<basePar>120/1/0</basePar>"), 1.2);
+        assert_eq!(attractiveness("<basePar>90</basePar>"), 0.9);
+        assert_eq!(attractiveness("<weight>1</weight>"), 1.0);
+        let mut settings = settings();
+        assert!((attracted(&settings, 0.3, 1.2) - 0.36).abs() < 1e-9);
+        assert!((attracted(&settings, 0.3, 0.9) - 0.27).abs() < 1e-9);
+        assert_eq!(attracted(&settings, 0.9, 1.5), 1.0);
+        settings.bait_attraction = 0.0;
+        assert_eq!(attracted(&settings, 0.3, 1.5), 0.3);
     }
 }

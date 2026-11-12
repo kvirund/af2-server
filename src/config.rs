@@ -43,6 +43,9 @@ pub struct FishingSettings {
     pub small_fish_nibble_share: f64,
     pub bait_per_catch: i32,
     pub full_bite_weight: f64,
+    /// How much of the bait's attractiveness reaches the bite: 1 in full, 0 not at all.
+    #[serde(default)]
+    pub bait_attraction: f64,
     pub large_share: f64,
     pub trophy_share: f64,
     pub trophy_depth_cm: f64,
