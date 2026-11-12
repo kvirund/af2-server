@@ -75,7 +75,7 @@ pub fn cells_in(settings: &BagSettings, character: &CharacterData, bag: i32) -> 
     start + character.bag_extra.get(&bag).copied().unwrap_or(0)
 }
 
-fn can_expand(settings: &BagSettings, bag: i32) -> bool {
+pub fn can_expand(settings: &BagSettings, bag: i32) -> bool {
     bag == STORAGE_BAG || (1..=settings.pages).contains(&bag)
 }
 

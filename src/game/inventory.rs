@@ -93,7 +93,7 @@ pub struct StackInfo {
 
 /// Older saves could have two things in one cell, which the client draws as one.
 /// The same thing goes onto the first stack as far as it fits; the rest moves to
-/// a free cell of its page, or stays put when the page is full.
+/// a free cell of the same bag or else of its page, or stays put when all are full.
 pub fn separate_shared_cells(settings: &BagSettings, character: &mut CharacterData, info: impl Fn(i32) -> StackInfo) -> usize {
     let mut changed = 0;
     let mut index = 0;
@@ -116,7 +116,15 @@ pub fn separate_shared_cells(settings: &BagSettings, character: &mut CharacterDa
                 continue;
             }
         }
-        if let Some((bag, cell)) = free_place(settings, character, about.kind, Some(item.id), &[]) {
+        // Backpack pages and the warehouse keep the thing in the same bag; slots
+        // of tackle and clothing do not fit anything else, so it goes to its page.
+        let same_bag = panels::can_expand(settings, item.bag)
+            .then(|| {
+                let taken = |cell: i32| character.items.iter().any(|other| other.bag == item.bag && other.cell == cell);
+                (0..panels::cells_in(settings, character, item.bag)).find(|cell| !taken(*cell)).map(|cell| (item.bag, cell))
+            })
+            .flatten();
+        if let Some((bag, cell)) = same_bag.or_else(|| free_place(settings, character, about.kind, Some(item.id), &[])) {
             (character.items[index].bag, character.items[index].cell) = (bag, cell);
         }
         index += 1;
@@ -740,5 +748,16 @@ mod tests {
         assert_eq!(separate_shared_cells(&bags(), &mut character, info), 2);
         let places: Vec<_> = character.items.iter().map(|item| (item.id, item.bag, item.cell, item.count)).collect();
         assert_eq!(places, vec![(1, 1, 0, 1), (2, 2, 0, 1), (3, 1, 1, 6)]);
+    }
+
+    #[test]
+    fn a_thing_sharing_a_warehouse_cell_stays_in_the_warehouse() {
+        let info = |_| StackInfo { kind: 10, stacks: false, max_count: 1 };
+        let mut character = CharacterData { items: vec![held(1, 0, 1018), held(2, 0, 1252)], ..Default::default() };
+        for item in &mut character.items {
+            item.bag = 52;
+        }
+        assert_eq!(separate_shared_cells(&bags(), &mut character, info), 1);
+        assert_eq!((character.items[1].bag, character.items[1].cell), (52, 1));
     }
 }
