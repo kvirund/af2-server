@@ -94,6 +94,33 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     Ok(Outcome::Answered)
 }
 
+/// Client 139: int base, int location, int point, from a zone on the edge of
+/// a location that leads into the next one in the same scene (Мост to Склон).
+/// Case 157 back moves the client there without loading the scene again; it
+/// shows the location's name and answers 1007.
+pub async fn walk_on(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let mut r = message.reader();
+    let (base, location) = (r.int32()?, r.int32()?);
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let Some(info) = destination(conn, base, location) else {
+        conn.log(&format!("   walk on to base {base} location {location}: unknown destination"));
+        return Ok(Outcome::Unanswered);
+    };
+    if !level_allows(conn, info, player) {
+        conn.log(&format!("   walk on to base {base} needs level {}, have {}", info.min_level, player.data.level));
+        return Ok(Outcome::Unanswered);
+    }
+    player.location = location;
+    player.base = base;
+
+    let mut w = AfcWriter::new();
+    w.int32(base).int32(location).int32(0).int32(0);
+    conn.send(msg::WALKED_ON, w.finish()).await?;
+    conn.log(&format!("   -> 157 walked on to base {base} location {location}"));
+    Ok(Outcome::Answered)
+}
+
 /// The base the character is at; a new session starts on the starting base.
 pub(super) fn current_base(settings: &Settings, player: &Player) -> i32 {
     base_of(&settings.bases, player.location)

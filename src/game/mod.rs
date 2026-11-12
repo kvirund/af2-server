@@ -165,6 +165,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::GO_TO_GAME => character::go_to_game(session, message).await,
 
         msg::TRAVEL | msg::TRAVEL_ARRIVE => travel::go(session, message).await,
+        msg::WALK_ON => travel::walk_on(session, message).await,
         msg::TRAVEL_OPTIONS => travel::options(session, message).await,
         msg::BASE_LIST => travel::return_to_base(session).await,
         msg::TRAVEL_START => {
