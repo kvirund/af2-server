@@ -71,6 +71,10 @@ pub struct CharacterData {
     pub known_recipes: HashMap<i32, i32>,
     /// Skills opened by a course, by perk id; sub-skills start at level 0.
     pub skills: BTreeMap<i32, Skill>,
+    /// Named numbers the original's item and quest scripts read and set with
+    /// `getQValue` and `setQValue`, such as `holod_1`, the fridge cards used at
+    /// base 1. A missing name reads as 0.
+    pub quest_values: BTreeMap<String, i32>,
     /// The skill experience goes to, 0 for none.
     pub studying: i32,
     /// When the doctor last healed the character, Unix seconds; 0 for never.

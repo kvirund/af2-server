@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS skills (
     PRIMARY KEY (character_id, perk)
 );
 
+CREATE TABLE IF NOT EXISTS quest_values (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    name TEXT NOT NULL,
+    value INTEGER NOT NULL,
+    PRIMARY KEY (character_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS id_sequence (
     only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
     next_id INTEGER NOT NULL
