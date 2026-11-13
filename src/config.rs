@@ -238,6 +238,9 @@ pub struct LootSettings {
     pub chance_percent: f64,
     pub items: Vec<LootItem>,
     pub base_card_chance_percent: f64,
+    /// The card of the species landed, for the species collection recipes ask for.
+    #[serde(default)]
+    pub fish_card_chance_percent: f64,
     /// Base id to the card of that base.
     pub base_cards: BTreeMap<i32, i32>,
     /// Premium currency on the hook: chance per fish and how much, least and most.
@@ -397,6 +400,9 @@ pub struct MasterySettings {
     /// How much more often a species bites per wreath, in percent.
     #[serde(default)]
     pub bite_percent: f64,
+    /// How much likelier the species' card is per wreath, in percent of its chance.
+    #[serde(default)]
+    pub card_percent: f64,
 }
 
 /// One faction, as the client's RepFractions resource has it. Going from level

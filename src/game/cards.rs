@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn wreaths_follow_the_fish_landed() {
-        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0 };
+        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0, card_percent: 5.0 };
         assert_eq!(mastery(&settings, 0), (0, 0.0));
         assert_eq!(mastery(&settings, 25), (0, 50.0));
         assert_eq!(mastery(&settings, 50), (1, 0.0));
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn each_wreath_adds_to_the_bite() {
-        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0 };
+        let settings = MasterySettings { catches: vec![50, 200, 500], bite_percent: 3.0, card_percent: 5.0 };
         let mut catches = BTreeMap::new();
         catches.insert(5, Catches { count: 250, grams: 0 });
         assert!((bite_factor(&settings, &catches, 5) - 1.06).abs() < 1e-9);

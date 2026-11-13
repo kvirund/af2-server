@@ -18,6 +18,9 @@ pub struct ItemEntry {
     pub count: i32,
     pub durability: f32,
     pub template: i32,
+    /// What this one piece is of, where the template leaves it open: the
+    /// species of a fish card. 0 for everything else.
+    pub param: i32,
 }
 
 /// Worms: shown for catches saved before baits were recorded.

@@ -343,7 +343,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     player.landed.insert(fish.id, fish);
     reputation::fish_landed(conn, player, bite.bait_item, grams).await?;
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
-    loot::after_catch(conn, player).await?;
+    loot::after_catch(conn, player, bite.species).await?;
     Ok(Outcome::Answered)
 }
 
@@ -509,7 +509,7 @@ mod tests {
     }
 
     fn held(id: i64, bag: i32, cell: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell, count: 1, durability: 1.0, template }
+        ItemEntry { id, bag, cell, count: 1, durability: 1.0, template, param: 0 }
     }
 
     #[test]

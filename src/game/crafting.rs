@@ -10,7 +10,7 @@ use super::{Outcome, Session, active, character, inventory, keepnet, perks, vita
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{CatalogItem, Recipe};
 use crate::messages as msg;
-use crate::storage::{CaughtFish, CharacterData};
+use crate::storage::{CaughtFish, CharacterData, ItemEntry};
 
 const RECIPE_KIND: i32 = 28;
 /// The kind of `<recept>` the client lists with the fields of `row`. The other
@@ -20,8 +20,9 @@ const SIMPLE_RECIPE: i32 = 0;
 const ITEM_INGREDIENT: f64 = 0.0;
 /// Bags below this are the inventory pages; the client counts only those.
 const FIRST_NON_INVENTORY_BAG: i32 = 50;
-/// A fish card names its species, which saved items do not keep yet.
-const FISH_CARD: i32 = 1309;
+/// A fish card: an item ingredient of it names the species in its fourth
+/// number, and the piece keeps the species in its `param`.
+pub const FISH_CARD: i32 = 1309;
 /// Species in a fish ingredient: any ordinary fish, or any mutant.
 const ANY_FISH: i32 = 0;
 const UNLIMITED: i32 = -1;
@@ -184,11 +185,11 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) 
     for ingredient in &recipe.ingredients {
         let (id, need) = (ingredient[0] as i32, ingredient[1].max(1.0) as i32);
         if ingredient[2] == ITEM_INGREDIENT {
-            if id == FISH_CARD {
-                return None;
-            }
+            // Every other item ingredient leaves its fourth number at 0.
+            let param = if id == FISH_CARD { ingredient[3] as i32 } else { 0 };
             let mut left = need;
-            for item in character.items.iter().filter(|item| item.template == id && item.bag < FIRST_NON_INVENTORY_BAG) {
+            let matching = |item: &&ItemEntry| item.template == id && item.param == param && item.bag < FIRST_NON_INVENTORY_BAG;
+            for item in character.items.iter().filter(matching) {
                 let already = taken.items.iter().filter(|(held, _)| *held == item.id).map(|(_, n)| n).sum::<i32>();
                 let part = left.min(item.count - already);
                 if part > 0 {
@@ -336,7 +337,7 @@ mod tests {
     }
 
     fn held(id: i64, template: i32, count: i32, bag: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell: 0, count, durability: 1.0, template }
+        ItemEntry { id, bag, cell: 0, count, durability: 1.0, template, param: 0 }
     }
 
     fn needing(ingredients: Vec<[f64; 6]>) -> Recipe {
@@ -355,6 +356,16 @@ mod tests {
         assert_eq!(ingredients_for(&character, &one_species, &[]).unwrap().fish, vec![3, 4]);
         let too_many = needing(vec![[0.0, 3.0, 1.0, 451.0, 1000.0, 0.0]]);
         assert_eq!(ingredients_for(&character, &too_many, &[]), None);
+    }
+
+    #[test]
+    fn a_collection_takes_the_card_of_its_own_species() {
+        let card = |id, species| ItemEntry { param: species, ..held(id, FISH_CARD, 1, 7) };
+        let character = CharacterData { items: vec![card(1, 78), card(2, 77)], ..Default::default() };
+        let recipe = needing(vec![[1309.0, 1.0, 0.0, 77.0, 0.0, 0.0], [1309.0, 1.0, 0.0, 78.0, 0.0, 0.0]]);
+        assert_eq!(ingredients_for(&character, &recipe, &[]).unwrap().items, vec![(2, 1), (1, 1)]);
+        let other = needing(vec![[1309.0, 1.0, 0.0, 54.0, 0.0, 0.0]]);
+        assert_eq!(ingredients_for(&character, &other, &[]), None);
     }
 
     #[test]

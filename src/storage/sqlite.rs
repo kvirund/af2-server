@@ -35,6 +35,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "characters", "healed_at", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "records", "location", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "records", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
+    add_column(pool, "items", "param", "INTEGER NOT NULL DEFAULT 0").await?;
     Ok(())
 }
 
@@ -73,7 +74,7 @@ impl SqliteStorage {
         character: &CharacterData,
     ) -> Result<()> {
         for item in &character.items {
-            sqlx::query("INSERT INTO items (id, character_id, bag, cell, count, durability, template) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO items (id, character_id, bag, cell, count, durability, template, param) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(item.id)
                 .bind(id)
                 .bind(item.bag)
@@ -81,6 +82,7 @@ impl SqliteStorage {
                 .bind(item.count)
                 .bind(f64::from(item.durability))
                 .bind(item.template)
+                .bind(item.param)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -224,8 +226,8 @@ impl Storage for SqliteStorage {
             return Ok(None);
         };
 
-        let items: Vec<(i64, i32, i32, i32, f64, i32)> = sqlx::query_as(
-            "SELECT id, bag, cell, count, durability, template FROM items WHERE character_id = ? ORDER BY id",
+        let items: Vec<(i64, i32, i32, i32, f64, i32, i32)> = sqlx::query_as(
+            "SELECT id, bag, cell, count, durability, template, param FROM items WHERE character_id = ? ORDER BY id",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -292,13 +294,14 @@ impl Storage for SqliteStorage {
             vitals: life.map(|life| Vitals { values: [life, stamina, radiation, food, water], work_points }),
             items: items
                 .into_iter()
-                .map(|(id, bag, cell, count, durability, template)| ItemEntry {
+                .map(|(id, bag, cell, count, durability, template, param)| ItemEntry {
                     id,
                     bag,
                     cell,
                     count,
                     durability: durability as f32,
                     template,
+                    param,
                 })
                 .collect(),
             fish: fish
@@ -401,7 +404,7 @@ mod tests {
             premium: 5,
             vip: true,
             vitals: Some(Vitals { values: [90.0, 80.5, 70.0, 60.0, 50.0], work_points: 12.5 }),
-            items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010 }],
+            items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010, param: 0 }, ItemEntry { id: 3, bag: 1, cell: 4, count: 2, durability: 1.0, template: 1309, param: 77 }],
             fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12 }],
             ..Default::default()
         };

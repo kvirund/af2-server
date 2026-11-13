@@ -99,6 +99,7 @@ async fn create_first_character(conn: &Conn, account: i64, persona: &str) -> Res
             count: kit.count,
             durability: item.durability,
             template: item.id,
+            param: 0,
         });
     }
 

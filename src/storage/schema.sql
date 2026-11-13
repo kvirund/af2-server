@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS items (
     cell INTEGER NOT NULL,
     count INTEGER NOT NULL,
     durability REAL NOT NULL,
-    template INTEGER NOT NULL
+    template INTEGER NOT NULL,
+    param INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS fish (

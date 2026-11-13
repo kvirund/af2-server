@@ -17,8 +17,20 @@ const FIRST_NON_INVENTORY_BAG: i32 = 50;
 const ITEM_EXPIRY_MONTHS: u32 = 120;
 
 /// The item record shared by cases 180 and 181.
+/// The description with the piece's own `param` as the first number of
+/// `basePar`, where the client reads a fish card's species.
+fn with_param(xml: &str, param: i32) -> std::borrow::Cow<'_, str> {
+    const OPEN: &str = "<basePar>";
+    let Some(start) = xml.find(OPEN).map(|at| at + OPEN.len()).filter(|_| param != 0) else {
+        return xml.into();
+    };
+    let end = xml[start..].find(['/', '<']).map_or(xml.len(), |at| start + at);
+    format!("{}{param}{}", &xml[..start], &xml[end..]).into()
+}
+
 fn write_item(w: &mut AfcWriter, conn: &Conn, owner: i64, item: &ItemEntry) {
     let xml = conn.world.catalog.get(item.template).map_or("", |template| template.xml.as_str());
+    let xml = with_param(xml, item.param);
     let now = Local::now().naive_local();
     let expiry = now.checked_add_months(Months::new(ITEM_EXPIRY_MONTHS)).unwrap_or(now);
 
@@ -26,7 +38,7 @@ fn write_item(w: &mut AfcWriter, conn: &Conn, owner: i64, item: &ItemEntry) {
     w.int32(item.bag).int32(item.cell).int32(item.count);
     w.single(item.durability).boolean(false);
     w.date_time(expiry);
-    w.string(xml);
+    w.string(&xml);
 }
 
 pub async fn send_all(conn: &Conn, player: &Player) -> Result<()> {
@@ -107,7 +119,7 @@ pub fn separate_shared_cells(settings: &BagSettings, character: &mut CharacterDa
         changed += 1;
         let about = info(item.template);
         let target = &mut character.items[first];
-        if about.stacks && target.template == item.template {
+        if about.stacks && target.template == item.template && target.param == item.param {
             let poured = item.count.min(about.max_count - target.count).max(0);
             target.count += poured;
             character.items[index].count -= poured;
@@ -419,7 +431,8 @@ pub async fn swap_items(session: &mut Session, message: &AfcMessage) -> Result<O
 fn merge(character: &mut CharacterData, target: i64, source: i64, capacity: i32) -> Option<Split> {
     let to = character.items.iter().position(|item| item.id == target)?;
     let from = character.items.iter().position(|item| item.id == source)?;
-    if to == from || character.items[to].template != character.items[from].template {
+    let (into, poured) = (&character.items[to], &character.items[from]);
+    if to == from || into.template != poured.template || into.param != poured.param {
         return None;
     }
     let moved = character.items[from].count.min(capacity - character.items[to].count).max(0);
@@ -491,6 +504,8 @@ pub struct Purchase {
     topped: Vec<(usize, i32)>,
     /// New cells and how many pieces go in each.
     new_stacks: Vec<((i32, i32), i32)>,
+    /// The `param` of the new pieces.
+    param: i32,
 }
 
 pub fn plan_purchase(
@@ -514,12 +529,29 @@ pub fn plan_pieces(
     item: &CatalogItem,
     pieces: i32,
 ) -> Result<Purchase, BuyError> {
+    plan_pieces_of(settings, character, item, pieces, 0)
+}
+
+/// As [`plan_pieces`], for pieces that carry their own `param`: they only go
+/// onto stacks with the same one.
+pub fn plan_pieces_of(
+    settings: &BagSettings,
+    character: &CharacterData,
+    item: &CatalogItem,
+    pieces: i32,
+    param: i32,
+) -> Result<Purchase, BuyError> {
     let capacity = if item.stacks { item.max_count.max(1) } else { 1 };
     let mut left = pieces;
     let mut topped = Vec::new();
     if item.stacks {
         for (index, held) in character.items.iter().enumerate() {
-            if held.template == item.id && held.bag < FIRST_NON_INVENTORY_BAG && held.count < capacity && left > 0 {
+            if held.template == item.id
+                && held.param == param
+                && held.bag < FIRST_NON_INVENTORY_BAG
+                && held.count < capacity
+                && left > 0
+            {
                 let added = left.min(capacity - held.count);
                 topped.push((index, added));
                 left -= added;
@@ -536,7 +568,7 @@ pub fn plan_pieces(
         new_stacks.push((place, pieces));
         left -= pieces;
     }
-    Ok(Purchase { topped, new_stacks })
+    Ok(Purchase { topped, new_stacks, param })
 }
 
 /// Pays for and hands over the items, returning those that changed.
@@ -565,7 +597,18 @@ pub async fn give(
     item: &CatalogItem,
     pieces: i32,
 ) -> Result<Result<Vec<ItemEntry>, BuyError>> {
-    match plan_pieces(&conn.world.settings.bags, &player.data, item, pieces) {
+    give_of(conn, player, item, pieces, 0).await
+}
+
+/// As [`give`], for pieces with their own `param`, such as a fish card's species.
+pub async fn give_of(
+    conn: &Conn,
+    player: &mut Player,
+    item: &CatalogItem,
+    pieces: i32,
+    param: i32,
+) -> Result<Result<Vec<ItemEntry>, BuyError>> {
+    match plan_pieces_of(&conn.world.settings.bags, &player.data, item, pieces, param) {
         Ok(plan) => Ok(Ok(place(conn, player, item, plan).await?)),
         Err(error) => Ok(Err(error)),
     }
@@ -585,6 +628,7 @@ async fn place(conn: &Conn, player: &mut Player, item: &CatalogItem, purchase: P
             count: pieces,
             durability: item.durability,
             template: item.id,
+            param: purchase.param,
         };
         player.data.items.push(entry.clone());
         changed.push(entry);
@@ -601,7 +645,7 @@ mod tests {
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag: 1, cell, count: 1, durability: 1.0, template }
+        ItemEntry { id, bag: 1, cell, count: 1, durability: 1.0, template, param: 0 }
     }
 
     /// Two pages of two cells; kind 10 belongs on the first.
@@ -621,7 +665,7 @@ mod tests {
     }
 
     fn stack(id: i64, bag: i32, cell: i32, count: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell, count, durability: 1.0, template }
+        ItemEntry { id, bag, cell, count, durability: 1.0, template, param: 0 }
     }
 
     #[test]
@@ -687,14 +731,14 @@ mod tests {
     fn stacks_join_an_existing_stack() {
         let character = CharacterData { money: 100, items: vec![held(1, 0, 10)], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &catalog_item(true, 1), 5);
-        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 5)], new_stacks: vec![] }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 5)], new_stacks: vec![], param: 0 }));
     }
 
     #[test]
     fn single_items_take_free_cells_in_order() {
         let character = CharacterData { money: 100, items: vec![held(1, 0, 99)], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &catalog_item(false, 1), 1);
-        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 1), 1)] }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 1), 1)], param: 0 }));
     }
 
     #[test]
@@ -702,7 +746,7 @@ mod tests {
         let item = CatalogItem { shop_count: 50, ..catalog_item(true, 1) };
         let character = CharacterData { money: 100, ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &item, 2);
-        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 0), 99), ((1, 1), 1)] }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 0), 99), ((1, 1), 1)], param: 0 }));
     }
 
     #[test]
@@ -712,7 +756,7 @@ mod tests {
         full.count = 90;
         let character = CharacterData { money: 100, items: vec![full], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &item, 1);
-        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 9)], new_stacks: vec![((1, 1), 21)] }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 9)], new_stacks: vec![((1, 1), 21)], param: 0 }));
     }
 
     #[test]
@@ -814,7 +858,7 @@ mod tests {
 
     #[test]
     fn pieces_are_taken_across_carried_stacks_but_not_from_storage() {
-        let stack = |id, bag, count| ItemEntry { id, bag, cell: id as i32, count, durability: 1.0, template: 1167 };
+        let stack = |id, bag, count| ItemEntry { id, bag, cell: id as i32, count, durability: 1.0, template: 1167, param: 0 };
         let mut character = CharacterData { items: vec![stack(1, 1, 3), stack(2, 52, 10), stack(3, 2, 4)], ..Default::default() };
         assert_eq!(pieces_carried(&character, 1167), 7);
         assert_eq!(take_carried(&mut character, 1167, 8), None);
@@ -822,5 +866,26 @@ mod tests {
         assert_eq!(gone, vec![1]);
         assert_eq!(smaller.iter().map(|item| (item.id, item.count)).collect::<Vec<_>>(), vec![(3, 2)]);
         assert_eq!(pieces_carried(&character, 1167), 2);
+    }
+
+    #[test]
+    fn a_card_shows_its_species_in_the_description() {
+        let xml = "<base><tid>1309</tid><basePar>0/0/0</basePar></base>";
+        assert_eq!(with_param(xml, 77), "<base><tid>1309</tid><basePar>77/0/0</basePar></base>");
+        assert_eq!(with_param(xml, 0), xml);
+        assert_eq!(with_param("<base></base>", 5), "<base></base>");
+    }
+
+    #[test]
+    fn cards_of_different_species_keep_apart() {
+        let mut card = catalog_item(true, 0);
+        card.id = 1309;
+        let mut held = stack(1, 1, 0, 3, 1309);
+        held.param = 78;
+        let character = CharacterData { items: vec![held], ..Default::default() };
+        let other = plan_pieces_of(&bags(), &character, &card, 1, 77).unwrap();
+        assert!(other.topped.is_empty());
+        let same = plan_pieces_of(&bags(), &character, &card, 1, 78).unwrap();
+        assert_eq!(same.topped, vec![(0, 1)]);
     }
 }

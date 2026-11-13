@@ -4,9 +4,9 @@
 use anyhow::Result;
 use rand::{random, random_range};
 
-use super::{Conn, Player, character, inventory, perks, reputation, travel};
+use super::{Conn, Player, cards, character, crafting, inventory, perks, reputation, travel};
 use crate::afc::AfcWriter;
-use crate::config::LootItem;
+use crate::config::{LootItem, Recipe};
 use crate::messages as msg;
 
 fn pick(items: &[LootItem], roll: f64) -> Option<&LootItem> {
@@ -23,13 +23,21 @@ fn pick(items: &[LootItem], roll: f64) -> Option<&LootItem> {
 
 const CRAFTSMANS_EYE: i32 = 131;
 
+/// Whether some recipe asks for the card of this species; only those drop.
+fn card_wanted(recipes: &[Recipe], species: i32) -> bool {
+    recipes.iter().flat_map(|recipe| &recipe.ingredients).any(|ingredient| {
+        ingredient[0] as i32 == crafting::FISH_CARD && ingredient[3] as i32 == species
+    })
+}
+
 fn happens(percent: f64) -> bool {
     random::<f64>() * 100.0 < percent
 }
 
 /// Rolls the loot of one landed fish and puts it in the bags. Case 126: int item,
 /// int count (not read), int quality; the client shows "Поймано: ...".
-pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
+/// `species` is the fish landed, whose card may come up with it.
+pub async fn after_catch(conn: &Conn, player: &mut Player, species: i32) -> Result<()> {
     let settings = &conn.world.settings;
     let loot = &settings.loot;
     let mut found = Vec::new();
@@ -42,13 +50,19 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
     if happens(chance)
         && let Some(item) = pick(&loot.items, random())
     {
-        found.push((item.item, item.count.max(1)));
+        found.push((item.item, item.count.max(1), 0));
+    }
+    // Each wreath of the species makes its card more likely.
+    let (wreaths, _) = cards::mastery(&settings.mastery, player.data.catches.get(&species).map_or(0, |catches| catches.count));
+    let card_chance = loot.fish_card_chance_percent * (1.0 + settings.mastery.card_percent / 100.0 * f64::from(wreaths));
+    if card_wanted(&conn.world.recipes, species) && happens(card_chance) {
+        found.push((crafting::FISH_CARD, 1, species));
     }
     let base = travel::current_base(settings, player);
     if let Some(card) = loot.base_cards.get(&base)
         && happens(loot.base_card_chance_percent * reputation::base_bonus(settings, player, per_level.base_card_percent))
     {
-        found.push((*card, 1));
+        found.push((*card, 1, 0));
     }
 
     if happens(loot.premium_chance_percent) {
@@ -60,19 +74,19 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
         conn.log(&format!("   -> 21 premium +{amount}, now {}", player.data.premium));
     }
 
-    for (template, count) in found {
+    for (template, count, param) in found {
         let Some(item) = conn.world.catalog.get(template) else {
             conn.log(&format!("   loot item {template} is not in the catalog"));
             continue;
         };
-        match inventory::give(conn, player, item, count).await? {
+        match inventory::give_of(conn, player, item, count, param).await? {
             Ok(changed) => {
                 inventory::send_updates(conn, player.data.id, &changed).await?;
                 let mut w = AfcWriter::new();
                 w.int32(template).int32(count).int32(0);
                 conn.send(msg::LOOT, w.finish()).await?;
                 conn.save(player).await?;
-                conn.log(&format!("   -> 126 loot {template} x{count}"));
+                conn.log(&format!("   -> 126 loot {template} x{count} (param {param})"));
             }
             Err(error) => conn.log(&format!("   loot {template} lost: {}", error.status())),
         }
