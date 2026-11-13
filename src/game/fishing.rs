@@ -181,6 +181,22 @@ fn attracted(settings: &FishingSettings, chance: f64, attractiveness: f64) -> f6
     (chance * (1.0 + settings.bait_attraction * (attractiveness - 1.0))).clamp(0.0, 1.0)
 }
 
+/// The `subType` of an item's description.
+fn subtype(xml: &str) -> Option<i32> {
+    xml.split_once("<subType>")?.1.split('<').next()?.trim().parse().ok()
+}
+
+/// «Джиги», «Воблеры» and «Блёсны»: each point of the skill for the lure on
+/// the rod adds `lureBitePercent` of the chance.
+fn lure_bonus(conn: &super::Conn, player: &super::Player, bait_xml: Option<&str>) -> f64 {
+    let settings = &conn.world.settings;
+    let Some(perk) = bait_xml.and_then(subtype).and_then(|kind| settings.skills.lure_skills.get(&kind)) else {
+        return 1.0;
+    };
+    let per_level = settings.skill_tree.get(*perk).map_or(0.0, |node| node.effect[0]);
+    1.0 + per_level * f64::from(perks::level_of(conn, player, *perk)) * settings.skills.lure_bite_percent / 100.0
+}
+
 /// Returns grams and size class for two rolls in `0..1`.
 fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
     let trophy_share = luck
@@ -245,6 +261,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let bait_item = bait.and_then(|template| world.catalog.get(template));
     let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
     let chance = attracted(settings, chance, bait_item.map_or(1.0, |item| attractiveness(&item.xml)));
+    let chance = (chance * lure_bonus(conn, player, bait_item.map(|item| item.xml.as_str()))).min(1.0);
 
     let mut w = AfcWriter::new();
     if options.is_empty() || random::<f64>() >= chance {
@@ -386,6 +403,12 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_lure_says_its_kind_in_the_sub_type() {
+        assert_eq!(subtype("<base><wtype>12</wtype><subType>6</subType></base>"), Some(6));
+        assert_eq!(subtype("<base><wtype>10</wtype></base>"), None);
+    }
+
 
     fn settings() -> FishingSettings {
         FishingSettings {

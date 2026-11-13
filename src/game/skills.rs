@@ -269,6 +269,9 @@ mod tests {
                 max_level: 5,
                 limit_base: 2,
                 limit_per_level: 1,
+                lure_skills: Default::default(),
+                lure_bite_percent: 0.0,
+                fish_cutting_station: 0,
             },
         }
     }

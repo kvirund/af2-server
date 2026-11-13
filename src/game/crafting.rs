@@ -30,6 +30,8 @@ const UNLIMITED: i32 = -1;
 /// «Опыт ремесла» takes its `val` per level in percent off the work points.
 const CRAFT: i32 = 130;
 const CRAFT_EXPERIENCE: i32 = 132;
+/// «Полевая переработка рыбы»: more of what the cutting table gives.
+const FIELD_PROCESSING: i32 = 550;
 const LEARNED: &str = "ok";
 const REFUSED: &str = "no_recept";
 
@@ -252,7 +254,8 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         per_level * f64::from(perks::level_of(&session.conn, player, perk))
     };
     let work = (f64::from(recipe.cost[2] as f32) * (1.0 - skill(CRAFT_EXPERIENCE) / 100.0)).max(0.0) as f32;
-    let crit_chance = recipe.crit_chance + skill(CRAFT);
+    let cutting = recipe.station == world.settings.skills.fish_cutting_station;
+    let crit_chance = recipe.crit_chance + skill(CRAFT) + if cutting { skill(FIELD_PROCESSING) } else { 0.0 };
     let points = player.data.vitals.as_ref().map_or(0.0, |vitals| vitals.work_points);
     let critical = recipe.crit_result[0] > 0.0 && random::<f64>() * 100.0 < crit_chance;
     let made = if critical { recipe.crit_result } else { recipe.result };

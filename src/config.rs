@@ -517,6 +517,17 @@ pub struct SkillSettings {
     /// Levels of all skills together a character may have: base + perLevel * level.
     pub limit_base: i32,
     pub limit_per_level: i32,
+    /// A lure's `subType` to the skill that helps with it: «Джиги», «Воблеры»,
+    /// «Блёсны».
+    #[serde(default)]
+    pub lure_skills: BTreeMap<i32, i32>,
+    /// Bite chance added per point of that skill, in percent of the chance.
+    #[serde(default)]
+    pub lure_bite_percent: f64,
+    /// The station that cuts fish, where «Полевая переработка рыбы» adds its
+    /// points to the critical chance.
+    #[serde(default)]
+    pub fish_cutting_station: i32,
 }
 
 /// One skill of the game's tree.
