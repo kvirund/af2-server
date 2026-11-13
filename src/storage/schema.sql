@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS reputation (
     PRIMARY KEY (character_id, faction)
 );
 
+CREATE TABLE IF NOT EXISTS gather_points (
+    base INTEGER NOT NULL,
+    point INTEGER NOT NULL,
+    kind INTEGER NOT NULL,
+    resource INTEGER NOT NULL,
+    respawn_at INTEGER NOT NULL,
+    PRIMARY KEY (base, point)
+);
+
 CREATE TABLE IF NOT EXISTS id_sequence (
     only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
     next_id INTEGER NOT NULL

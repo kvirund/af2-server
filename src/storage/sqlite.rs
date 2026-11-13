@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use sqlx::{Sqlite, Transaction};
 
-use super::{Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, UNKNOWN_BAIT, Vitals};
+use super::{Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals};
 
 const MAX_CONNECTIONS: u32 = 4;
 
@@ -369,6 +369,34 @@ impl Storage for SqliteStorage {
                 .await?;
         Ok(id)
     }
+
+    async fn load_gather_points(&self) -> Result<Vec<StoredGatherPoint>> {
+        let rows: Vec<(i32, i32, i32, i32, i64)> =
+            sqlx::query_as("SELECT base, point, kind, resource, respawn_at FROM gather_points ORDER BY base, point")
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(base, point, kind, resource, respawn_at)| StoredGatherPoint { base, point, kind, resource, respawn_at })
+            .collect())
+    }
+
+    async fn save_gather_points(&self, base: i32, points: &[StoredGatherPoint]) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM gather_points WHERE base = ?").bind(base).execute(&mut *transaction).await?;
+        for point in points {
+            sqlx::query("INSERT INTO gather_points (base, point, kind, resource, respawn_at) VALUES (?, ?, ?, ?, ?)")
+                .bind(base)
+                .bind(point.point)
+                .bind(point.kind)
+                .bind(point.resource)
+                .bind(point.respawn_at)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -381,6 +409,16 @@ mod tests {
             SqlitePoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
         sqlx::raw_sql(include_str!("schema.sql")).execute(&pool).await.unwrap();
         SqliteStorage { pool }
+    }
+
+    #[tokio::test]
+    async fn gather_points_of_a_base_are_replaced_together() {
+        let store = memory_store().await;
+        let point = |base, point, resource| StoredGatherPoint { base, point, kind: 1, resource, respawn_at: 1_700_000_000 };
+        store.save_gather_points(1, &[point(1, 5, 101), point(1, 6, 0)]).await.unwrap();
+        store.save_gather_points(2, &[point(2, 5, 102)]).await.unwrap();
+        store.save_gather_points(1, &[point(1, 5, 0)]).await.unwrap();
+        assert_eq!(store.load_gather_points().await.unwrap(), vec![point(1, 5, 0), point(2, 5, 102)]);
     }
 
     #[tokio::test]

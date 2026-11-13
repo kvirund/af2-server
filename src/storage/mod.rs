@@ -115,6 +115,19 @@ pub struct CharacterSummary {
     pub level: i32,
 }
 
+/// A gather point of a base scene, shared by every player.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StoredGatherPoint {
+    pub base: i32,
+    pub point: i32,
+    /// The point's type in the scene, which says what can grow on it.
+    pub kind: i32,
+    /// What lies there now, 0 for nothing.
+    pub resource: i32,
+    /// When an empty point grows again, Unix seconds.
+    pub respawn_at: i64,
+}
+
 #[async_trait]
 pub trait Storage: Send + Sync {
     /// Finds the account for a login key, creating it the first time.
@@ -131,4 +144,9 @@ pub trait Storage: Send + Sync {
 
     /// An id for an item or fish, unique across all characters.
     async fn next_id(&self) -> Result<i64>;
+
+    async fn load_gather_points(&self) -> Result<Vec<StoredGatherPoint>>;
+
+    /// Replaces what is kept for this base.
+    async fn save_gather_points(&self, base: i32, points: &[StoredGatherPoint]) -> Result<()>;
 }

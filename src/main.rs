@@ -16,7 +16,7 @@ use af2_server::files::find_config_dir;
 use anyhow::{Context, Result, bail};
 use tokio::net::TcpListener;
 
-use storage::SqliteStorage;
+use storage::{SqliteStorage, Storage};
 use world::{Log, World};
 
 const USAGE: &str = "af2-server [--config <dir>] [--db <file>] [--bind <ip>] [--port <n>] [--trace <file>]";
@@ -64,6 +64,8 @@ async fn run(options: Options) -> Result<()> {
         .await
         .with_context(|| format!("cannot open {}", db_path.display()))?;
 
+    let gather_points = store.load_gather_points().await?;
+
     let trace = match options.trace {
         Some(path) => Some(OpenOptions::new().create(true).append(true).open(path)?),
         None => None,
@@ -79,6 +81,7 @@ async fn run(options: Options) -> Result<()> {
         Box::new(store),
         Log::new(trace),
     ));
+    world.restore_gather_points(gather_points);
 
     let listener = TcpListener::bind((bind.as_str(), port)).await?;
     world.log.line(&format!("listening on {bind}:{port}, saving to {}", db_path.display()));

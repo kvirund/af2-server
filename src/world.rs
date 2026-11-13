@@ -5,13 +5,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use chrono::Local;
 use tokio::sync::Notify;
 
 use crate::config::{Catalog, FishTable, Recipe, Settings};
-use crate::storage::Storage;
+use crate::storage::{Storage, StoredGatherPoint};
 
 pub struct Log {
     trace: Option<Mutex<File>>,
@@ -70,7 +69,9 @@ pub struct GatherPoint {
     pub kind: i32,
     /// The client's `restype_N`, or 0 while the point is empty.
     pub resource: i32,
-    pub respawn_at: Instant,
+    /// When an empty point grows again, Unix seconds: it keeps counting while
+    /// the server is off.
+    pub respawn_at: i64,
 }
 
 pub struct World {
@@ -114,6 +115,15 @@ impl World {
 
     pub fn release(&self, character: i64, connection: u64) {
         self.online.release(character, connection);
+    }
+
+    /// Puts back the gather points kept from the last run.
+    pub fn restore_gather_points(&self, stored: Vec<StoredGatherPoint>) {
+        let mut all = self.gather_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        for point in stored {
+            let kept = GatherPoint { kind: point.kind, resource: point.resource, respawn_at: point.respawn_at };
+            all.entry(point.base).or_default().insert(point.point, kept);
+        }
     }
 }
 
