@@ -33,8 +33,7 @@ fn reputation_short(shop: &ShopSettings, factions: &ReputationSettings, characte
 
 /// Whether the base's shops sell the item.
 pub(super) fn sells(world: &crate::world::World, base: i32, template: i32) -> bool {
-    let priced = world.catalog.get(template).is_some_and(|item| item.cost > 0 || item.premium_cost > 0 || item.cost_item[0] > 0);
-    priced && world.settings.shop.stocked(base).is_none_or(|ids| ids.contains(&template))
+    world.catalog.get(template).is_some_and(|item| world.settings.shop.sells(base, item))
 }
 
 /// The level an item asks for.
@@ -45,8 +44,9 @@ pub(super) fn level_of(item: &CatalogItem) -> i32 {
 /// Priced items this character's base sells.
 fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
     let world = &conn.world;
+    let shop = &world.settings.shop;
     let base = travel::current_base(&world.settings, player);
-    let stock: Vec<&CatalogItem> = match world.settings.shop.stocked(base) {
+    let mut stock: Vec<&CatalogItem> = match shop.stocked(base) {
         Some(ids) => ids
             .iter()
             .filter_map(|id| world.catalog.get(*id))
@@ -54,6 +54,10 @@ fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
             .collect(),
         None => world.catalog.for_sale().collect(),
     };
+    // The goods paid for in ergs stand in no guide's list, so they come on top
+    // of the base's own, and only the ones it does not already name.
+    let listed: Vec<i32> = stock.iter().map(|item| item.id).collect();
+    stock.extend(world.catalog.premium_only().filter(|item| shop.sold_everywhere(item) && !listed.contains(&item.id)));
     // Recipes the character knows for good are left out: the client cannot say so.
     stock.into_iter().filter(|item| !crafting::teaches_nothing_new(&world.recipes, &player.data, item)).collect()
 }

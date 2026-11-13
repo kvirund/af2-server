@@ -223,6 +223,9 @@ pub struct ShopSettings {
     /// Each base sells what `config/shops.json` lists; otherwise everything with a price.
     #[serde(default)]
     pub guide_stock: bool,
+    /// Items priced in ergs alone are sold at every base, whatever the lists say.
+    #[serde(default)]
+    pub premium_everywhere: bool,
     #[serde(skip)]
     pub stock: ShopStock,
     /// Item kinds nobody can wear, so the shop leaves them out.
@@ -352,6 +355,20 @@ impl ShopSettings {
         }
         let stock = &self.stock;
         Some(stock.bases.get(&base).or_else(|| stock.bases.get(&stock.fallback_base)).map_or(&[], Vec::as_slice))
+    }
+
+    /// Whether this item is on every base's counter without being listed: the
+    /// guide the lists come from prices everything in credits, so the goods
+    /// paid for in ergs are nowhere in it.
+    pub fn sold_everywhere(&self, item: &CatalogItem) -> bool {
+        self.premium_everywhere && item.cost <= 0 && item.premium_cost > 0
+    }
+
+    /// Whether a base's shops sell the item: it has a price, and either the
+    /// base's own list names it or it is one of the goods sold everywhere.
+    pub fn sells(&self, base: i32, item: &CatalogItem) -> bool {
+        let priced = item.cost > 0 || item.premium_cost > 0 || item.cost_item[0] > 0;
+        priced && (self.sold_everywhere(item) || self.stocked(base).is_none_or(|ids| ids.contains(&item.id)))
     }
 
     /// Applies the settings to one catalog item; a price of 0 means "not for sale".
@@ -849,8 +866,16 @@ pub struct BoardSettings {
     pub trophies: [i32; 2],
     /// Income tasks pay this share of what the fish would sell for.
     pub income_percent: f64,
+    /// Ergs an income task pays besides the money, least and most, before the
+    /// colour. The developers' forum has «в "доходе": эрг, припасы».
+    #[serde(default)]
+    pub income_reals: [i32; 2],
     /// Experience tasks give this share of the fish's own experience.
     pub experience_percent: f64,
+    /// Ergs an experience task pays, least and most, before the colour: the
+    /// board was where the original's ergs came from, 4 to 8 by the forum.
+    #[serde(default)]
+    pub experience_reals: [i32; 2],
     /// Base reputation per colour step plus one.
     pub reputation_points: i64,
     pub daily_income_percent: f64,
@@ -1303,6 +1328,12 @@ impl Catalog {
     pub fn for_sale(&self) -> impl Iterator<Item = &CatalogItem> {
         self.items.iter().filter(|item| item.cost > 0 || item.cost_item[0] > 0)
     }
+
+    /// Items with no price in credits that are paid for in ergs: the premium
+    /// counter, which no player guide lists.
+    pub fn premium_only(&self) -> impl Iterator<Item = &CatalogItem> {
+        self.items.iter().filter(|item| item.cost <= 0 && item.premium_cost > 0)
+    }
 }
 
 /// One line of `data/recipes.json`, which the launcher extracts from the game.
@@ -1512,6 +1543,36 @@ mod tests {
         assert_eq!(cost(item(6, 29)), 0);
         assert_eq!(cost(item(7, 14)), 0);
         assert_eq!(cost(item(8, 14)), 100);
+    }
+
+    #[test]
+    fn goods_priced_in_ergs_are_sold_everywhere() {
+        let item = |id, cost, premium_cost| CatalogItem { id, cost, premium_cost, ..Default::default() };
+        let (bread, ration) = (item(1012, 75, 0), item(1327, 0, 10));
+        let shop = |premium_everywhere| ShopSettings {
+            guide_stock: true,
+            premium_everywhere,
+            stock: ShopStock { fallback_base: 1, bases: [(1, vec![1012])].into(), ..Default::default() },
+            ..Default::default()
+        };
+
+        // The lists come from a guide that prices everything in credits, so the
+        // ration is in none of them; base 6 has no list of its own at all.
+        let on = shop(true);
+        assert!(on.sells(1, &bread) && on.sells(1, &ration));
+        assert!(on.sells(6, &ration) && !on.sells(6, &item(1016, 310, 0)));
+        assert!(!on.sells(1, &item(1327, 0, 0)));
+
+        // Switched off, only the lists count.
+        let off = shop(false);
+        assert!(off.sells(1, &bread) && !off.sells(1, &ration));
+    }
+
+    #[test]
+    fn the_premium_counter_holds_what_costs_ergs_alone() {
+        let item = |id, cost, premium_cost| CatalogItem { id, cost, premium_cost, ..Default::default() };
+        let catalog = Catalog::new(vec![item(1012, 75, 0), item(1327, 0, 10), item(1304, 9306, 10), item(1111, 0, 0)]);
+        assert_eq!(catalog.premium_only().map(|item| item.id).collect::<Vec<_>>(), vec![1327]);
     }
 
     #[test]

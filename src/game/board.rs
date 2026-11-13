@@ -109,6 +109,14 @@ fn between(roll: f64, range: [i32; 2]) -> i32 {
     range[0] + (roll * f64::from(range[1] - range[0] + 1)) as i32
 }
 
+/// The ergs a task pays, as its reward line writes them: the range before the
+/// colour, raised by the colour like every other reward. An empty range pays
+/// none, so a board can be left without them.
+fn reals(roll: f64, range: [i32; 2], size: f64) -> Option<String> {
+    let reals = (f64::from(between(roll, range)) * size).round() as i64;
+    (reals > 0).then(|| format!("reals={reals}"))
+}
+
 fn quality_of(weights: &[f64], roll: f64) -> i32 {
     let total: f64 = weights.iter().sum();
     let mut left = roll * total;
@@ -219,7 +227,10 @@ fn make_offer(world: &World, base: i32, category: i32, union: Option<&UnionBoard
                 reward.push(format!("wpn={}/{}", union.item[0], union.item[1].max(1)));
             }
         }
-        INCOME => reward.push(format!("money={}", (worth * board.income_percent / 100.0 * size).round() as i64)),
+        INCOME => {
+            reward.push(format!("money={}", (worth * board.income_percent / 100.0 * size).round() as i64));
+            reward.extend(reals(roll(), board.income_reals, size));
+        }
         RESOURCES => {
             let items = resource_items(board, base);
             if !items.is_empty() {
@@ -228,6 +239,7 @@ fn make_offer(world: &World, base: i32, category: i32, union: Option<&UnionBoard
         }
         EXPERIENCE => {
             reward.push(format!("exp={}", (experience * board.experience_percent / 100.0 * size).round() as i64));
+            reward.extend(reals(roll(), board.experience_reals, size));
             if let Some(faction) = reputation::base_faction(&settings.reputation, base) {
                 reward.push(format!("repfrac={faction}/{}", board.reputation_points * i64::from(quality + 1)));
             }
@@ -682,6 +694,15 @@ mod tests {
         assert_eq!(quality_of(&weights, 0.999), 4);
         assert_eq!(between(0.0, [3, 8]), 3);
         assert_eq!(between(0.999, [3, 8]), 8);
+    }
+
+    #[test]
+    fn ergs_grow_with_the_colour_and_can_be_switched_off() {
+        assert_eq!(reals(0.0, [4, 8], 1.0), Some("reals=4".to_string()));
+        assert_eq!(reals(0.999, [4, 8], 1.0), Some("reals=8".to_string()));
+        // The gold colour is four steps of 25%, which doubles the reward.
+        assert_eq!(reals(0.0, [4, 8], 2.0), Some("reals=8".to_string()));
+        assert_eq!(reals(0.5, [0, 0], 2.0), None);
     }
 
     #[test]
