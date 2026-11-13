@@ -6,11 +6,11 @@
 //! mix of size classes and the fight parameters are recorded nowhere and are set
 //! in `config/settings.json`.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, reputation, vitals, perks};
+use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, reputation, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
@@ -324,7 +324,8 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         experience: experience_for(progression, bite.grams, bite.size_class, education),
     };
     let is_record = bite.grams > player.data.records.get(&bite.species).map_or(0, |record| record.grams);
-    let shown = if is_record { fish.experience * progression.record_experience_factor } else { fish.experience };
+    let record = if is_record { progression.record_experience_factor } else { 1 };
+    let shown = (f64::from(fish.experience * record) * vip::multiplier(&player.data, conn.world.settings.vip.experience_percent)).round() as i32;
 
     let mut w = AfcWriter::new();
     w.int32(rod);
@@ -367,13 +368,14 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         conn.send(msg::PERSONAL_RECORD, w.finish()).await?;
     }
 
-    let progression = &conn.world.settings.progression;
-    let multiplier = if is_record { progression.record_experience_factor } else { 1 };
+    let settings = &conn.world.settings;
+    let record = if is_record { settings.progression.record_experience_factor } else { 1 };
+    let multiplier = f64::from(record) * vip::multiplier(&player.data, settings.vip.experience_percent);
     let experience = fish.experience;
     player.data.fish.push(fish);
 
     let mut w = AfcWriter::new();
-    w.int32(experience.checked_mul(multiplier).context("experience overflow")?);
+    w.int32((f64::from(experience) * multiplier).round() as i32);
     conn.send(msg::FISH_KEPT, w.finish()).await?;
 
     character::award_experience(conn, player, experience, multiplier).await?;

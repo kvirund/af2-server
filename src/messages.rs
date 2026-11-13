@@ -86,6 +86,8 @@ pub const ITEM_SWAP: i32 = 184;
 pub const ITEM_MERGE: i32 = 195;
 pub const HEARTBEAT: i32 = 255;
 pub const ACTIVE_ICONS: i32 = 260;
+/// C→S int 0 from the VIP window's button; S→C int 1 bought, -1 not enough ergs.
+pub const VIP_BUY: i32 = 220;
 pub const FISH_SWAP_KEEPNETS: i32 = 285;
 pub const FISH_RELEASE: i32 = 286;
 pub const REFINE: i32 = 290;

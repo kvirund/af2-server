@@ -102,8 +102,10 @@ pub struct CharacterData {
     pub studying: i32,
     /// When the doctor last healed the character, Unix seconds; 0 for never.
     pub healed_at: i64,
-    /// Opens the VIP-only buttons. Set by hand in the database for now.
+    /// VIP for good, set by hand in the database: the bought patent is `vip_until`.
     pub vip: bool,
+    /// When the bought VIP patent ends, Unix seconds; 0 for never bought.
+    pub vip_until: i64,
     /// `None` until the character first enters the game: it starts at full.
     pub vitals: Option<Vitals>,
 }

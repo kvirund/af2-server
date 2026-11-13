@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, cards, inventory, keepnet, panels, perks, skills, travel, vitals};
+use super::{Account, Conn, Outcome, Player, Session, cards, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -162,8 +162,8 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     travel::send_base_list(&session.conn).await?;
     travel::send_base_details(&session.conn, start_base).await?;
     send_details(&session.conn, player, msg::CHARACTER_DETAILS).await?;
-    if player.data.vip {
-        keepnet::send_vip_icon(&session.conn).await?;
+    if vip::active(&player.data) {
+        vip::send_icon(&session.conn, &player.data).await?;
     }
     inventory::send_all(&session.conn, player).await?;
     perks::send(&session.conn, player).await?;
@@ -222,8 +222,8 @@ pub async fn send_update(conn: &Conn, player: &Player) -> Result<()> {
 /// Case 155: long gained, long current, float skill share, long base, float
 /// multiplier. Each new level is case 103: int level, long experience to the
 /// next, two unread ints, then life, stamina, radiation, food and water gains.
-pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32, multiplier: i32) -> Result<()> {
-    let gained = i64::from(experience) * i64::from(multiplier);
+pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32, multiplier: f64) -> Result<()> {
+    let gained = (f64::from(experience) * multiplier).round() as i64;
     let cost = perks::effects(conn, player).level_cost;
     let reached = add_experience(&conn.world.settings.progression, &mut player.data, gained, cost);
     conn.save(player).await?;
@@ -233,7 +233,7 @@ pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32,
     let mut w = AfcWriter::new();
     w.int64(gained)
         .int64(player.data.experience)
-        .single(0.0)
+        .single(skills::share(&conn.world.settings.skills, gained) as f32)
         .int64(i64::from(experience))
         .single(multiplier as f32);
     conn.send(msg::EXPERIENCE_GAINED, w.finish()).await?;

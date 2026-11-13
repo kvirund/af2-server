@@ -36,6 +36,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "records", "location", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "records", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
     add_column(pool, "items", "param", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "characters", "vip_until", "INTEGER NOT NULL DEFAULT 0").await?;
     Ok(())
 }
 
@@ -190,7 +191,7 @@ impl Storage for SqliteStorage {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
         let id = sqlx::query(
-            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(character.account)
         .bind(&character.name)
@@ -207,6 +208,7 @@ impl Storage for SqliteStorage {
         .bind(work_points)
         .bind(character.studying)
         .bind(character.healed_at)
+        .bind(character.vip_until)
         .execute(&mut *transaction)
         .await?
         .last_insert_rowid();
@@ -216,13 +218,13 @@ impl Storage for SqliteStorage {
     }
 
     async fn load_character(&self, id: i64) -> Result<Option<CharacterData>> {
-        let row: Option<(i64, String, i32, i64, i64, i64, bool, Option<f32>, f32, f32, f32, f32, f32, i32, i64)> = sqlx::query_as(
-            "SELECT account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at FROM characters WHERE id = ?",
+        let row: Option<(i64, String, i32, i64, i64, i64, bool, Option<f32>, f32, f32, f32, f32, f32, i32, i64, i64)> = sqlx::query_as(
+            "SELECT account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until FROM characters WHERE id = ?",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        let Some((account, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at)) = row else {
+        let Some((account, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until)) = row else {
             return Ok(None);
         };
 
@@ -291,6 +293,7 @@ impl Storage for SqliteStorage {
             money,
             premium,
             vip,
+            vip_until,
             vitals: life.map(|life| Vitals { values: [life, stamina, radiation, food, water], work_points }),
             items: items
                 .into_iter()
@@ -334,7 +337,7 @@ impl Storage for SqliteStorage {
     async fn save_character(&self, character: &CharacterData) -> Result<()> {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ?, healed_at = ? WHERE id = ?")
+        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ?, healed_at = ?, vip_until = ? WHERE id = ?")
             .bind(character.level)
             .bind(character.experience)
             .bind(character.money)
@@ -348,6 +351,7 @@ impl Storage for SqliteStorage {
             .bind(work_points)
             .bind(character.studying)
             .bind(character.healed_at)
+            .bind(character.vip_until)
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
@@ -441,6 +445,7 @@ mod tests {
             money: 500,
             premium: 5,
             vip: true,
+            vip_until: 1_800_000_000,
             vitals: Some(Vitals { values: [90.0, 80.5, 70.0, 60.0, 50.0], work_points: 12.5 }),
             items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010, param: 0 }, ItemEntry { id: 3, bag: 1, cell: 4, count: 2, durability: 1.0, template: 1309, param: 77 }],
             fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12 }],

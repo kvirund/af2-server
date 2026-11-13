@@ -20,6 +20,7 @@ mod reputation;
 mod shop;
 mod skills;
 mod travel;
+mod vip;
 mod vitals;
 
 use std::collections::{BTreeMap, HashMap};
@@ -105,6 +106,9 @@ pub struct Player {
     pub last_tick: Instant,
     pub last_save: Instant,
     pub last_active: Instant,
+    /// VIP skill experience earned online and not handed out yet.
+    pub vip_skill_points: f64,
+    pub last_vip_tick: Instant,
 }
 
 impl Player {
@@ -122,6 +126,8 @@ impl Player {
             last_tick: now,
             last_save: now,
             last_active: now,
+            vip_skill_points: 0.0,
+            last_vip_tick: now,
         }
     }
 }
@@ -152,7 +158,8 @@ impl Session {
 
 /// Time passing for the character, if enough of it has.
 pub async fn tick(session: &mut Session) -> Result<()> {
-    vitals::tick(session).await
+    vitals::tick(session).await?;
+    vip::tick(session).await
 }
 
 /// The character in play. A borrow of the field alone leaves `conn` usable.
@@ -228,6 +235,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::ITEM_USE => vitals::use_item(session, message).await,
         msg::FISH_PRICES => keepnet::prices(session, message).await,
         msg::FISH_SELL => keepnet::sell(session, message).await,
+        msg::VIP_BUY => vip::buy(session).await,
 
         _ => Ok(Outcome::Unanswered),
     }

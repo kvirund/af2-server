@@ -206,6 +206,10 @@ public sealed class Probe : IPhotonPeerListener
         probe.Send(138, travel);
         probe.Pump(1500);
 
+        // UIVIPWindow.buyVIP(): int 0. Answered by 220 (1 bought, -1 short of ergs).
+        probe.Send(220, [0, 0, 0, 0]);
+        probe.Pump(500);
+
         // PoplDrop bite request: rod 0, the sixth starter item as bait at offset 60. Repeat until the
         // random bite comes up, then land and keep the fish.
         byte[] biteRequest = new byte[95];

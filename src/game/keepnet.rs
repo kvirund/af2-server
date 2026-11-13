@@ -4,9 +4,8 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use chrono::{Local, TimeDelta};
 
-use super::{Conn, Outcome, Player, Session, active, inventory, reputation, travel};
+use super::{Conn, Outcome, Player, Session, active, inventory, reputation, travel, vip};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
@@ -113,22 +112,6 @@ pub async fn swap_keepnets(session: &mut Session) -> Result<Outcome> {
     Ok(Outcome::Answered)
 }
 
-/// Ends the same way as a bought patent would, though `true` below keeps it on.
-const VIP_DAYS: i64 = 365;
-/// The client's flag for a bought VIP patent, which alone enables the market's
-/// "prices" and "sell all" buttons.
-const VIP_ICON: i32 = 20;
-
-/// Case 260: until the end int icon, 3 x double for its tooltip, end date, bool
-/// never expires. Has to follow case 100, which clears the icons.
-pub async fn send_vip_icon(conn: &Conn) -> Result<()> {
-    let mut w = AfcWriter::new();
-    w.int32(VIP_ICON).double(0.0).double(0.0).double(0.0);
-    w.date_time(Local::now().naive_local() + TimeDelta::days(VIP_DAYS));
-    w.boolean(true);
-    conn.send(msg::ACTIVE_ICONS, w.finish()).await
-}
-
 /// The rarer the species, the dearer it sells.
 fn price_per_kg(market: &FishMarketSettings, largest_share: f64, species: &Species, size_class: i32) -> i32 {
     let rarity = (largest_share / species.share).sqrt();
@@ -232,8 +215,10 @@ pub async fn sell(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         _ => 0,
     };
 
+    // The client shows "Получено earned+bonus= total".
+    let bonus = vip::bonus(&player.data, world.settings.vip.fish_price_percent, earned as f64).round() as i64;
     player.data.fish.retain(|fish| !matches(fish));
-    player.data.money += earned;
+    player.data.money += earned + bonus;
     conn.save(player).await?;
 
     for id in &sold {
@@ -243,9 +228,9 @@ pub async fn sell(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let mut w = AfcWriter::new();
-    w.double(earned as f64).double(0.0).double(player.data.money as f64);
+    w.double(earned as f64).double(bonus as f64).double(player.data.money as f64);
     conn.send(msg::FISH_SELL, w.finish()).await?;
-    conn.log(&format!("   -> 1210 sold {} of species {species_id} class {size_class} for {earned}", sold.len()));
+    conn.log(&format!("   -> 1210 sold {} of species {species_id} class {size_class} for {earned}+{bonus}", sold.len()));
     Ok(Outcome::Answered)
 }
 

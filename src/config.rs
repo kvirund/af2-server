@@ -352,10 +352,29 @@ pub struct Settings {
     pub mastery: MasterySettings,
     #[serde(default)]
     pub reputation: ReputationSettings,
+    #[serde(default)]
+    pub vip: VipSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
     pub starter_kit: Vec<StarterItem>,
+}
+
+/// The VIP patent: its price and what it gives.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VipSettings {
+    /// Price in ergs, the premium money.
+    pub premium_cost: i64,
+    pub days: i64,
+    /// Added to what the fish market pays.
+    pub fish_price_percent: f64,
+    /// Of the chance itself.
+    pub loot_chance_percent: f64,
+    /// Added to the experience for a fish.
+    pub experience_percent: f64,
+    /// Experience points for the skill on study while online.
+    pub skill_points_per_minute: f64,
 }
 
 /// The doctor in a base's scene, who heals for a fish.

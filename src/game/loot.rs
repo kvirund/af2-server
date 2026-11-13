@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rand::{random, random_range};
 
-use super::{Conn, Player, cards, character, crafting, inventory, perks, reputation, travel};
+use super::{Conn, Player, cards, character, crafting, inventory, perks, reputation, travel, vip};
 use crate::afc::AfcWriter;
 use crate::config::{LootItem, Recipe};
 use crate::messages as msg;
@@ -46,7 +46,8 @@ pub async fn after_catch(conn: &Conn, player: &mut Player, species: i32) -> Resu
     let per_level = &settings.reputation.per_level;
     let chance = loot.chance_percent
         * (1.0 + eye * f64::from(perks::level_of(conn, player, CRAFTSMANS_EYE)) / 100.0)
-        * reputation::base_bonus(settings, player, per_level.loot_percent);
+        * reputation::base_bonus(settings, player, per_level.loot_percent)
+        * vip::multiplier(&player.data, settings.vip.loot_chance_percent);
     if happens(chance)
         && let Some(item) = pick(&loot.items, random())
     {
