@@ -140,6 +140,14 @@ impl SqliteStorage {
                 .execute(&mut **transaction)
                 .await?;
         }
+        for (faction, points) in &character.reputation {
+            sqlx::query("INSERT INTO reputation (character_id, faction, points) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(faction)
+                .bind(points)
+                .execute(&mut **transaction)
+                .await?;
+        }
         for (perk, skill) in &character.skills {
             sqlx::query("INSERT INTO skills (character_id, perk, level, experience) VALUES (?, ?, ?, ?)")
                 .bind(id)
@@ -266,6 +274,12 @@ impl Storage for SqliteStorage {
                 .fetch_all(&self.pool)
                 .await?;
 
+        let reputation: Vec<(i32, i64)> =
+            sqlx::query_as("SELECT faction, points FROM reputation WHERE character_id = ?")
+                .bind(id)
+                .fetch_all(&self.pool)
+                .await?;
+
         Ok(Some(CharacterData {
             id,
             account,
@@ -308,6 +322,7 @@ impl Storage for SqliteStorage {
             known_recipes: known_recipes.into_iter().collect(),
             skills: skills.into_iter().map(|(perk, level, experience)| (perk, Skill { level, experience })).collect(),
             quest_values: quest_values.into_iter().collect(),
+            reputation: reputation.into_iter().collect(),
             studying,
             healed_at,
         }))
@@ -333,7 +348,7 @@ impl Storage for SqliteStorage {
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
-        for table in ["items", "fish", "records", "catches", "bag_extra", "known_recipes", "skills", "quest_values"] {
+        for table in ["items", "fish", "records", "catches", "bag_extra", "known_recipes", "skills", "quest_values", "reputation"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE character_id = ?"))
                 .bind(character.id)
                 .execute(&mut *transaction)
@@ -398,6 +413,7 @@ mod tests {
         character.studying = 100;
         character.healed_at = 1_700_000_000;
         character.quest_values.insert("holod_1".into(), 3);
+        character.reputation.insert(1, 450);
         character.id = store.create_character(&character).await.unwrap();
 
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);

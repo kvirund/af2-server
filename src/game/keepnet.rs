@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use chrono::{Local, TimeDelta};
 
-use super::{Conn, Outcome, Player, Session, active, inventory, travel};
+use super::{Conn, Outcome, Player, Session, active, inventory, reputation, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
@@ -70,19 +70,20 @@ pub async fn release(session: &mut Session, message: &AfcMessage) -> Result<Outc
     let player = active(&mut session.player)?;
     let conn = &session.conn;
 
-    if player.landed.remove(&id).is_some() {
+    if let Some(fish) = player.landed.remove(&id) {
         conn.log(&format!("   fish {id} released on landing"));
+        reputation::fish_released(conn, player, fish.grams).await?;
         return Ok(Outcome::Answered);
     }
 
-    let before = player.data.fish.len();
-    player.data.fish.retain(|fish| fish.id != id);
-    if player.data.fish.len() == before {
+    let Some(index) = player.data.fish.iter().position(|fish| fish.id == id) else {
         conn.log(&format!("   release: unknown fish {id}"));
         return Ok(Outcome::Unanswered);
-    }
+    };
+    let fish = player.data.fish.remove(index);
     conn.save(player).await?;
     conn.log(&format!("   fish {id} released from the keepnet"));
+    reputation::fish_released(conn, player, fish.grams).await?;
     Ok(Outcome::Answered)
 }
 

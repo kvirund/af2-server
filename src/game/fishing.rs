@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, vitals, perks};
+use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, reputation, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
@@ -254,7 +254,8 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let species = pick(&options, total, random());
-    let luck = perks::effects(conn, player).trophy;
+    let luck_percent = world.settings.reputation.per_level.luck_percent;
+    let luck = perks::effects(conn, player).trophy * reputation::base_bonus(&world.settings, player, luck_percent);
     let rolled = roll_weight(settings, species, depth, min_grams, luck, random(), random());
     let (grams, size_class) = fit_to_tackle(species, rolled, min_grams, max_grams, random());
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
@@ -311,7 +312,8 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         return Ok(Outcome::Unanswered);
     };
 
-    let education = perks::effects(conn, player).experience;
+    let per_level = &conn.world.settings.reputation.per_level;
+    let education = perks::effects(conn, player).experience * reputation::base_bonus(&conn.world.settings, player, per_level.experience_percent);
     let fish = CaughtFish {
         id: conn.world.store.next_id().await?,
         species: bite.species,
@@ -337,7 +339,9 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let catches = player.data.catches.entry(fish.species).or_default();
     catches.count += 1;
     catches.grams += i64::from(fish.grams);
+    let grams = fish.grams;
     player.landed.insert(fish.id, fish);
+    reputation::fish_landed(conn, player, bite.bait_item, grams).await?;
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
     loot::after_catch(conn, player).await?;
     Ok(Outcome::Answered)

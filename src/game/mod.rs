@@ -4,9 +4,11 @@
 mod cards;
 mod character;
 mod crafting;
+mod dialog;
 mod doctor;
 mod fishing;
 mod fridge;
+mod generator;
 mod gathering;
 mod inventory;
 mod loot;
@@ -14,6 +16,7 @@ mod keepnet;
 mod panels;
 mod perks;
 mod refining;
+mod reputation;
 mod shop;
 mod skills;
 mod travel;
@@ -192,13 +195,18 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         // trade fish, and the others' windows are still to do.
         msg::NPC_TALK => match doctor::talk(session, message).await? {
             Some(outcome) => Ok(outcome),
-            None => keepnet::open_market(session, message).await,
+            None => match generator::talk(session, message).await? {
+                Some(outcome) => Ok(outcome),
+                None => keepnet::open_market(session, message).await,
+            },
         },
+        msg::DIALOG_ANSWER if generator::is_open(session) => generator::answer(session, message).await,
         msg::DIALOG_ANSWER => doctor::answer(session, message).await,
+        msg::REPUTATION => reputation::tab(session).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,
         msg::STATISTICS => cards::statistics(session).await,
         msg::RECORDS if matches!(message.reader().int32(), Ok(0)) => cards::records(session).await,
-        id @ (msg::REPUTATION | msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
+        id @ (msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }
         msg::PERKS => perks::window(session).await,

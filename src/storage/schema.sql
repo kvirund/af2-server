@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS quest_values (
     PRIMARY KEY (character_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS reputation (
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    faction INTEGER NOT NULL,
+    points INTEGER NOT NULL,
+    PRIMARY KEY (character_id, faction)
+);
+
 CREATE TABLE IF NOT EXISTS id_sequence (
     only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
     next_id INTEGER NOT NULL

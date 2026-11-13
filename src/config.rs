@@ -341,6 +341,8 @@ pub struct Settings {
     pub fridge: FridgeSettings,
     #[serde(default)]
     pub mastery: MasterySettings,
+    #[serde(default)]
+    pub reputation: ReputationSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
@@ -389,6 +391,72 @@ pub struct MasterySettings {
     /// How much more often a species bites per wreath, in percent.
     #[serde(default)]
     pub bite_percent: f64,
+}
+
+/// One faction, as the client's RepFractions resource has it. Going from level
+/// `n` to `n + 1` takes `start_a + start_b * kf_b * n` points, as the client
+/// computes it for the bar in the reputation tab.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactionSettings {
+    pub start_a: i64,
+    pub start_b: i64,
+    pub kf_b: f64,
+    /// Level names the client has for the faction, the first being level 0.
+    pub levels: i32,
+}
+
+/// Biofuel handed in at the generator.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratorSettings {
+    /// The NPC's id in the base scene, which is also its dialog file.
+    pub npc: i32,
+    pub base: i32,
+    pub faction: i32,
+    pub item: i32,
+    pub points: i64,
+}
+
+/// Points for a fish let go: `points` plus one for every `grams_per_point`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseSettings {
+    pub points: i64,
+    pub grams_per_point: i64,
+}
+
+/// A «Вклад» skill: points with a guild for fish landed on its kind of rod.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContributionSettings {
+    pub perk: i32,
+    pub rod_kind: i32,
+    pub faction: i32,
+}
+
+/// What each level of a base's reputation adds there, in percent.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReputationBonuses {
+    pub experience_percent: f64,
+    pub loot_percent: f64,
+    pub luck_percent: f64,
+    pub base_card_percent: f64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReputationSettings {
+    pub factions: BTreeMap<i32, FactionSettings>,
+    /// The faction of each base.
+    pub base_factions: BTreeMap<i32, i32>,
+    pub generator: GeneratorSettings,
+    pub release: ReleaseSettings,
+    pub contribution: Vec<ContributionSettings>,
+    /// By skill level from 1: points for each fish and grams for one point more.
+    pub contribution_levels: Vec<[i64; 2]>,
+    pub per_level: ReputationBonuses,
 }
 
 /// Fish kept on ice, one fridge per base.

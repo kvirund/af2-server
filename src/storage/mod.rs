@@ -93,6 +93,8 @@ pub struct CharacterData {
     /// `getQValue` and `setQValue`, such as `holod_1`, the fridge cards used at
     /// base 1. A missing name reads as 0.
     pub quest_values: BTreeMap<String, i32>,
+    /// Reputation points earned with each faction, all levels together.
+    pub reputation: BTreeMap<i32, i64>,
     /// The skill experience goes to, 0 for none.
     pub studying: i32,
     /// When the doctor last healed the character, Unix seconds; 0 for never.

@@ -9,6 +9,7 @@
 use anyhow::Result;
 use chrono::{Local, NaiveDate, NaiveDateTime, TimeDelta};
 
+use super::dialog::{COUNT_MARK, close, open, option, replace, text};
 use super::{Conn, Outcome, Player, Session, active, fridge, inventory, keepnet, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{DoctorSettings, Price};
@@ -32,9 +33,6 @@ const THANKS: i32 = 8;
 const ASK_MORE: i32 = 9;
 const GIVE_MUTOMASS: i32 = 10;
 
-/// What the texts with a count of things carried show it as.
-const COUNT_MARK: &str = "[cnt]";
-
 /// The fish the doctor gets: the lightest one in the keepnet heavy enough.
 fn payment(fish: &[CaughtFish], min_grams: i32) -> Option<&CaughtFish> {
     fish.iter()
@@ -55,32 +53,6 @@ fn wait_seconds(healed_at: i64, now: i64, cooldown_minutes: i64) -> i64 {
 fn dotnet_ticks(time: NaiveDateTime) -> i64 {
     let origin = NaiveDate::from_ymd_opt(1, 1, 1).unwrap_or_default().and_hms_opt(0, 0, 0).unwrap_or_default();
     (time - origin).num_seconds() * 10_000_000
-}
-
-async fn option(conn: &Conn, file: i32, node: i32, answer: i32, param: i64) -> Result<()> {
-    let mut w = AfcWriter::new();
-    w.int32(file).int32(node).int32(answer).int64(param);
-    conn.send(msg::DIALOG_OPTION, w.finish()).await
-}
-
-async fn text(conn: &Conn, file: i32, node: i32) -> Result<()> {
-    let mut w = AfcWriter::new();
-    w.int32(file).int32(node);
-    conn.send(msg::DIALOG_TEXT, w.finish()).await
-}
-
-async fn open(conn: &Conn, player: &mut Player, file: i32) -> Result<()> {
-    player.dialog = Some(file);
-    let mut w = AfcWriter::new();
-    w.int32(file);
-    conn.send(msg::DIALOG_OPEN, w.finish()).await
-}
-
-async fn close(conn: &Conn, player: &mut Player, file: i32) -> Result<()> {
-    player.dialog = None;
-    let mut w = AfcWriter::new();
-    w.int32(file);
-    conn.send(msg::DIALOG_CLOSE, w.finish()).await
 }
 
 /// Node 2: the terms, when the next treatment is, and the fish to give if the
@@ -109,13 +81,6 @@ async fn terms(conn: &Conn, player: &mut Player, doctor: &DoctorSettings) -> Res
     }
     option(conn, doctor.npc, TERMS, UNDERSTOOD, 0).await?;
     open(conn, player, doctor.npc).await
-}
-
-/// Case 78 replaces a mark in the text shown last.
-async fn replace(conn: &Conn, mark: &str, with: &str) -> Result<()> {
-    let mut w = AfcWriter::new();
-    w.string(mark).string(with);
-    conn.send(msg::DIALOG_REPLACE, w.finish()).await
 }
 
 /// Nodes 3 and 5: what the doctor wants, how much the character carries, and

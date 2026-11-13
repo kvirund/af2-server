@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rand::{random, random_range};
 
-use super::{Conn, Player, character, inventory, perks, travel};
+use super::{Conn, Player, character, inventory, perks, reputation, travel};
 use crate::afc::AfcWriter;
 use crate::config::LootItem;
 use crate::messages as msg;
@@ -35,7 +35,10 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
     let mut found = Vec::new();
     // «Глаз ремесленника»: its `val` per level, in percent of the chance.
     let eye = settings.skill_tree.get(CRAFTSMANS_EYE).map_or(0.0, |node| node.effect[0]);
-    let chance = loot.chance_percent * (1.0 + eye * f64::from(perks::level_of(conn, player, CRAFTSMANS_EYE)) / 100.0);
+    let per_level = &settings.reputation.per_level;
+    let chance = loot.chance_percent
+        * (1.0 + eye * f64::from(perks::level_of(conn, player, CRAFTSMANS_EYE)) / 100.0)
+        * reputation::base_bonus(settings, player, per_level.loot_percent);
     if happens(chance)
         && let Some(item) = pick(&loot.items, random())
     {
@@ -43,7 +46,7 @@ pub async fn after_catch(conn: &Conn, player: &mut Player) -> Result<()> {
     }
     let base = travel::current_base(settings, player);
     if let Some(card) = loot.base_cards.get(&base)
-        && happens(loot.base_card_chance_percent)
+        && happens(loot.base_card_chance_percent * reputation::base_bonus(settings, player, per_level.base_card_percent))
     {
         found.push((*card, 1));
     }
