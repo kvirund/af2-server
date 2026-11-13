@@ -292,8 +292,11 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     w.single(0.0); // shy-bite modifier
     w.single(speed as f32);
     w.single((stamina * hardiness) as f32);
-    w.single(1.0); // no client use found
-    w.single(1.0); // drain rate during the fight
+    // How hard the fish pulls on top of 80% of its weight, times 0.85..1.15:
+    // (power + 5) / 200 of its weight at most. 1 keeps fish no stronger than so far.
+    w.single(1.0);
+    // Chance per second, in percent, that the fish comes off on its own early in the fight.
+    w.single(1.0);
     w.int32(species.id);
     w.single(size as f32); // between the model's smallest and largest
     w.int64(bait_id);

@@ -16,21 +16,52 @@ const OLD_BACKPACK_BAG: i32 = 0;
 const FIRST_NON_INVENTORY_BAG: i32 = 50;
 const ITEM_EXPIRY_MONTHS: u32 = 120;
 
-/// The item record shared by cases 180 and 181.
-/// The description with the piece's own `param` as the first number of
-/// `basePar`, where the client reads a fish card's species.
-fn with_param(xml: &str, param: i32) -> std::borrow::Cow<'_, str> {
+/// Lines: `basePar` is test/diameter/length, and the client reads the length
+/// of what is left on the spool from the third number.
+const LINE_KIND: i32 = 5;
+const LINE_LENGTH_SLOT: usize = 2;
+
+/// Where a kind keeps the piece's own `param` in `basePar`: a fish card's
+/// species in the first number, a line's length left in the third.
+fn param_slot(kind: i32) -> usize {
+    if kind == LINE_KIND { LINE_LENGTH_SLOT } else { 0 }
+}
+
+/// The span of the `slot`-th number of `basePar`, if there is one.
+fn base_par_span(xml: &str, slot: usize) -> Option<(usize, usize)> {
     const OPEN: &str = "<basePar>";
-    let Some(start) = xml.find(OPEN).map(|at| at + OPEN.len()).filter(|_| param != 0) else {
+    let mut start = xml.find(OPEN)? + OPEN.len();
+    for _ in 0..slot {
+        let next = xml[start..].find(['/', '<'])?;
+        if xml[start + next..].starts_with('<') {
+            return None;
+        }
+        start += next + 1;
+    }
+    let end = xml[start..].find(['/', '<']).map_or(xml.len(), |at| start + at);
+    Some((start, end))
+}
+
+/// The description with the piece's own `param` in place of the `slot`-th
+/// number of `basePar`; 0 leaves the description as it is.
+fn with_param(xml: &str, param: i32, slot: usize) -> std::borrow::Cow<'_, str> {
+    let Some((start, end)) = base_par_span(xml, slot).filter(|_| param != 0) else {
         return xml.into();
     };
-    let end = xml[start..].find(['/', '<']).map_or(xml.len(), |at| start + at);
     format!("{}{param}{}", &xml[..start], &xml[end..]).into()
 }
 
+/// A line's length in metres as its description gives it.
+fn template_length(xml: &str) -> Option<f64> {
+    let (start, end) = base_par_span(xml, LINE_LENGTH_SLOT)?;
+    xml[start..end].trim().parse().ok()
+}
+
+/// The item record shared by cases 180 and 181.
 fn write_item(w: &mut AfcWriter, conn: &Conn, owner: i64, item: &ItemEntry) {
-    let xml = conn.world.catalog.get(item.template).map_or("", |template| template.xml.as_str());
-    let xml = with_param(xml, item.param);
+    let template = conn.world.catalog.get(item.template);
+    let xml = template.map_or("", |template| template.xml.as_str());
+    let xml = with_param(xml, item.param, param_slot(template.map_or(0, |template| template.kind)));
     let now = Local::now().naive_local();
     let expiry = now.checked_add_months(Months::new(ITEM_EXPIRY_MONTHS)).unwrap_or(now);
 
@@ -339,17 +370,92 @@ pub async fn throw_away(session: &mut Session, message: &AfcMessage) -> Result<O
     let id = r.int64()?;
     let player = active(&mut session.player)?;
     let conn = &session.conn;
-    let Some(item) = throw_out(&mut player.data, id) else {
+    let Some(item) = destroy(conn, player, id).await? else {
         conn.log(&format!("   throw away: character has no item {id}"));
         return Ok(Outcome::Unanswered);
     };
+    conn.log(&format!("   -> 190 item {id} (template {}, {} pieces) thrown away", item.template, item.count));
+    Ok(Outcome::Answered)
+}
+
+/// What is left of a line after `torn` metres went: `None` when nothing is.
+/// `left` is the piece's own `param`, 0 for a whole line.
+fn shortened(full: f64, left: i32, torn: f32) -> Option<i32> {
+    let now = if left > 0 { f64::from(left) } else { full };
+    let after = (now - f64::from(torn)).round() as i32;
+    (after > 0).then_some(after)
+}
+
+/// Takes a whole item away and tells the client; worn gear also resends
+/// the character and skills.
+async fn destroy(conn: &Conn, player: &mut Player, id: i64) -> Result<Option<ItemEntry>> {
+    let Some(item) = throw_out(&mut player.data, id) else {
+        return Ok(None);
+    };
     conn.save(player).await?;
     send_removed(conn, id).await?;
-    conn.log(&format!("   -> 190 item {id} (template {}, {} pieces) thrown away", item.template, item.count));
     if conn.world.settings.bags.holds_gear(item.bag) {
         character::send_update(conn, player).await?;
         perks::send(conn, player).await?;
     }
+    Ok(Some(item))
+}
+
+/// Client 1305 long item: a rod broke in the fight, or a line of 10 m or less
+/// tore. The client has put it aside on its side (bag 500).
+pub async fn broken(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let id = message.reader().int64()?;
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    match destroy(conn, player, id).await? {
+        Some(item) => conn.log(&format!("   -> 190 item {id} (template {}) broke in the fight", item.template)),
+        None => conn.log(&format!("   broken: character has no item {id}")),
+    }
+    Ok(Outcome::Answered)
+}
+
+/// Client 1306 long line, float metres: the line tore and that much of it
+/// went. The client leaves its own copy as it was, so the shorter line goes
+/// back as 181 with the length left in its description.
+pub async fn line_torn(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let mut r = message.reader();
+    let (id, metres) = (r.int64()?, r.single()?);
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let Some(index) = player.data.items.iter().position(|item| item.id == id) else {
+        conn.log(&format!("   line torn: character has no item {id}"));
+        return Ok(Outcome::Answered);
+    };
+    let item = &player.data.items[index];
+    let full = conn.world.catalog.get(item.template).and_then(|template| template_length(&template.xml)).unwrap_or(0.0);
+    match shortened(full, item.param, metres) {
+        Some(left) => {
+            player.data.items[index].param = left;
+            let changed = player.data.items[index].clone();
+            conn.save(player).await?;
+            send_updates(conn, player.data.id, &[changed]).await?;
+            conn.log(&format!("   -> 181 line {id} lost {metres:.1} m, {left} m left"));
+        }
+        None => {
+            destroy(conn, player, id).await?;
+            conn.log(&format!("   -> 190 line {id} lost {metres:.1} m, nothing left"));
+        }
+    }
+    Ok(Outcome::Answered)
+}
+
+/// Client 1307 long item, once per piece that went with a torn line: hook,
+/// bait, float, lure or feeder. One piece of it goes.
+pub async fn tackle_lost(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let id = message.reader().int64()?;
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    if !player.data.items.iter().any(|item| item.id == id) {
+        conn.log(&format!("   tackle lost: character has no item {id}"));
+        return Ok(Outcome::Answered);
+    }
+    conn.log(&format!("   item {id} went with the line"));
+    use_piece(conn, player, id).await?;
     Ok(Outcome::Answered)
 }
 
@@ -910,9 +1016,20 @@ mod tests {
     #[test]
     fn a_card_shows_its_species_in_the_description() {
         let xml = "<base><tid>1309</tid><basePar>0/0/0</basePar></base>";
-        assert_eq!(with_param(xml, 77), "<base><tid>1309</tid><basePar>77/0/0</basePar></base>");
-        assert_eq!(with_param(xml, 0), xml);
-        assert_eq!(with_param("<base></base>", 5), "<base></base>");
+        assert_eq!(with_param(xml, 77, 0), "<base><tid>1309</tid><basePar>77/0/0</basePar></base>");
+        assert_eq!(with_param(xml, 0, 0), xml);
+        assert_eq!(with_param("<base></base>", 5, 0), "<base></base>");
+    }
+
+    #[test]
+    fn a_line_shows_what_is_left_of_it() {
+        let xml = "<base><basePar>40/0.26/100</basePar></base>";
+        assert_eq!(with_param(xml, 96, param_slot(LINE_KIND)), "<base><basePar>40/0.26/96</basePar></base>");
+        assert_eq!(template_length(xml), Some(100.0));
+        assert_eq!(with_param("<basePar>40</basePar>", 96, 2), "<basePar>40</basePar>");
+        assert_eq!(shortened(100.0, 0, 3.4), Some(97));
+        assert_eq!(shortened(100.0, 97, 3.6), Some(93));
+        assert_eq!(shortened(100.0, 3, 4.0), None);
     }
 
     #[test]

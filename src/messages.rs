@@ -86,6 +86,15 @@ pub const ITEM_UPDATES: i32 = 181;
 pub const ITEM_MOVE: i32 = 182;
 pub const ITEM_SWAP: i32 = 184;
 pub const ITEM_MERGE: i32 = 195;
+/// C→S long item: a rod broke, or a short line tore away whole.
+pub const ITEM_BROKEN: i32 = 1305;
+/// C→S long line, float metres torn off.
+pub const LINE_TORN: i32 = 1306;
+/// C→S long item: a piece of tackle went with a torn line.
+pub const TACKLE_LOST: i32 = 1307;
+/// C→S long character, string name, int 1 rod / 2 line, int template: the
+/// news for other players that someone broke their tackle.
+pub const TACKLE_NEWS: i32 = 910;
 pub const HEARTBEAT: i32 = 255;
 pub const ACTIVE_ICONS: i32 = 260;
 /// C→S int 0 from the VIP window's button; S→C int 1 bought, -1 not enough ergs.

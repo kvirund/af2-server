@@ -190,6 +190,13 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::ITEM_SWAP => inventory::swap_items(session, message).await,
         msg::ITEM_MERGE => inventory::merge_items(session, message).await,
         msg::ITEMS_REMOVED => inventory::throw_away(session, message).await,
+        msg::ITEM_BROKEN => inventory::broken(session, message).await,
+        msg::LINE_TORN => inventory::line_torn(session, message).await,
+        msg::TACKLE_LOST => inventory::tackle_lost(session, message).await,
+        msg::TACKLE_NEWS => {
+            session.conn.log("   tackle news: no other players to tell");
+            Ok(Outcome::Answered)
+        }
 
         msg::BITE => fishing::bite(session, message).await,
         msg::FISH_LANDED => fishing::landed(session, message).await,
