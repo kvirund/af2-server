@@ -322,6 +322,37 @@ pub fn remove_one(character: &mut CharacterData, id: i64) {
     }
 }
 
+/// Takes the whole item away; `None` when the character has no such item.
+fn throw_out(character: &mut CharacterData, id: i64) -> Option<ItemEntry> {
+    let index = character.items.iter().position(|item| item.id == id)?;
+    Some(character.items.remove(index))
+}
+
+/// Client 190 long item: the item dropped on the bin after the client asked
+/// "are you sure". The client has already taken it out of its own list. Other
+/// shapes of 190 (with the fridge or a place before the item) are not this.
+pub async fn throw_away(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let mut r = message.reader();
+    if r.remaining() != 8 {
+        return Ok(Outcome::Unanswered);
+    }
+    let id = r.int64()?;
+    let player = active(&mut session.player)?;
+    let conn = &session.conn;
+    let Some(item) = throw_out(&mut player.data, id) else {
+        conn.log(&format!("   throw away: character has no item {id}"));
+        return Ok(Outcome::Unanswered);
+    };
+    conn.save(player).await?;
+    send_removed(conn, id).await?;
+    conn.log(&format!("   -> 190 item {id} (template {}, {} pieces) thrown away", item.template, item.count));
+    if conn.world.settings.bags.holds_gear(item.bag) {
+        character::send_update(conn, player).await?;
+        perks::send(conn, player).await?;
+    }
+    Ok(Outcome::Answered)
+}
+
 /// Case 190: item ids until the end of the message.
 pub async fn send_removed(conn: &Conn, id: i64) -> Result<()> {
     let mut w = AfcWriter::new();
@@ -646,6 +677,14 @@ mod tests {
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
         ItemEntry { id, bag: 1, cell, count: 1, durability: 1.0, template, param: 0 }
+    }
+
+    #[test]
+    fn a_thrown_item_goes_whole() {
+        let mut character = CharacterData { items: vec![held(1, 0, 10), ItemEntry { count: 5, ..held(2, 1, 11) }], ..Default::default() };
+        assert_eq!(throw_out(&mut character, 2).map(|item| item.count), Some(5));
+        assert_eq!(character.items, vec![held(1, 0, 10)]);
+        assert_eq!(throw_out(&mut character, 2), None);
     }
 
     /// Two pages of two cells; kind 10 belongs on the first.
