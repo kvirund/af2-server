@@ -408,7 +408,7 @@ mod tests {
             stacks: false,
             shop_count: 1,
             max_count: 1,
-            xml: format!("<base><basePar>3/142/{uses}</basePar></base>"),
+            premium_cost: 0, xml: format!("<base><basePar>3/142/{uses}</basePar></base>"),
         };
         let recipes = [recipe(3, 0)];
         let mut character = CharacterData::default();

@@ -499,7 +499,9 @@ pub fn plan_purchase(
     item: &CatalogItem,
     count: i32,
 ) -> Result<Purchase, BuyError> {
-    if item.cost.saturating_mul(i64::from(count)) > character.money {
+    if item.cost.saturating_mul(i64::from(count)) > character.money
+        || item.premium_cost.saturating_mul(i64::from(count)) > character.premium
+    {
         return Err(BuyError::NoMoney);
     }
     plan_pieces(settings, character, item, count.saturating_mul(item.shop_count.max(1)))
@@ -550,6 +552,7 @@ pub async fn buy(
     };
     let changed = place(conn, player, item, purchase).await?;
     player.data.money -= item.cost * i64::from(count);
+    player.data.premium -= item.premium_cost * i64::from(count);
     conn.save(player).await?;
     Ok(Ok(changed))
 }
@@ -594,7 +597,7 @@ mod tests {
     use super::*;
 
     fn catalog_item(stacks: bool, cost: i64) -> CatalogItem {
-        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, xml: String::new() }
+        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new() }
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
@@ -717,6 +720,15 @@ mod tests {
         let mut character = CharacterData { items: vec![held(1, 0, 10)], ..Default::default() };
         remove_one(&mut character, 1);
         assert!(character.items.is_empty());
+    }
+
+    #[test]
+    fn ergs_pay_for_an_erg_price() {
+        let item = CatalogItem { cost: 0, premium_cost: 20, ..catalog_item(false, 0) };
+        let poor = CharacterData { money: 1_000_000, premium: 19, ..Default::default() };
+        assert_eq!(plan_purchase(&bags(), &poor, &item, 1), Err(BuyError::NoMoney));
+        let rich = CharacterData { premium: 20, ..Default::default() };
+        assert!(plan_purchase(&bags(), &rich, &item, 1).is_ok());
     }
 
     #[test]

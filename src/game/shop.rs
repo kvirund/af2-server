@@ -28,7 +28,11 @@ fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
     let world = &conn.world;
     let base = travel::current_base(&world.settings, player);
     let stock: Vec<&CatalogItem> = match world.settings.shop.stocked(base) {
-        Some(ids) => ids.iter().filter_map(|id| world.catalog.get(*id)).filter(|item| item.cost > 0).collect(),
+        Some(ids) => ids
+            .iter()
+            .filter_map(|id| world.catalog.get(*id))
+            .filter(|item| item.cost > 0 || item.premium_cost > 0)
+            .collect(),
         None => world.catalog.for_sale().collect(),
     };
     // Recipes the character knows for good are left out: the client cannot say so.
@@ -73,7 +77,7 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
     w.int32(listed.len() as i32);
     for item in &listed {
-        w.int32(item.id).string(&format!("{}|0|0", item.cost));
+        w.int32(item.id).string(&format!("{}|{}|0", item.cost, item.premium_cost));
         w.double(0.0).double(0.0).double(0.0).boolean(level_allows(&conn.world.settings.shop, level, item));
     }
     conn.send(msg::SHOP_LIST, w.finish()).await?;
@@ -119,7 +123,7 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
             inventory::send_updates(conn, player.data.id, &changed).await?;
             character::send_money(conn, player, player.data.money - before).await?;
             send_status(conn, &format!("ok={template}/{count}/0")).await?;
-            conn.log(&format!("   -> 1310 bought {template} x{count}, money {}", player.data.money));
+            conn.log(&format!("   -> 1310 bought {template} x{count}, money {}, ergs {}", player.data.money, player.data.premium));
         }
     }
     Ok(Outcome::Answered)
@@ -131,7 +135,7 @@ mod tests {
     use crate::config::ShopStock;
 
     fn item(xml: &str) -> CatalogItem {
-        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, xml: xml.to_owned() }
+        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: xml.to_owned() }
     }
 
     #[test]

@@ -284,12 +284,18 @@ impl ShopSettings {
     }
 
     /// Applies the settings to one catalog item; a price of 0 means "not for sale".
+    /// The client wants every part of a price at once, so an item costs either
+    /// credits or, with none, the ergs of its `pricePt`. A price set here is in
+    /// credits.
     fn adjust(&self, item: &mut CatalogItem) {
         if let Some(price) = self.prices.get(&item.id) {
             item.cost = *price;
+        } else if item.cost <= 0 {
+            item.premium_cost = tag_number(&item.xml, "pricePt").unwrap_or(0).max(0);
         }
         if self.hidden_kinds.contains(&item.kind) || self.hidden_items.contains(&item.id) {
             item.cost = 0;
+            item.premium_cost = 0;
         }
     }
 }
@@ -588,6 +594,16 @@ pub struct CatalogItem {
     #[serde(default = "one")]
     pub max_count: i32,
     pub xml: String,
+    /// Price in ergs, the premium money, for an item with no price in credits:
+    /// the `pricePt` of its description, set when the settings are applied.
+    #[serde(skip)]
+    pub premium_cost: i64,
+}
+
+/// A whole number in an item's description, such as `<pricePt>20</pricePt>`.
+fn tag_number(xml: &str, tag: &str) -> Option<i64> {
+    let open = format!("<{tag}>");
+    xml.split_once(open.as_str())?.1.split('<').next()?.trim().parse().ok()
 }
 
 #[derive(Debug)]
@@ -728,6 +744,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_item_without_credits_costs_its_ergs() {
+        let shop = ShopSettings { hidden_items: vec![7], prices: [(5, 1000)].into(), ..Default::default() };
+        let item = |id, cost| CatalogItem {
+            id,
+            kind: 34,
+            cost,
+            durability: 1.0,
+            stacks: false,
+            shop_count: 1,
+            max_count: 1,
+            premium_cost: 0,
+            xml: "<priceCr>0</priceCr><pricePt>20</pricePt>".into(),
+        };
+        let prices = |mut item: CatalogItem| {
+            shop.adjust(&mut item);
+            (item.cost, item.premium_cost)
+        };
+        assert_eq!(prices(item(4, 0)), (0, 20));
+        assert_eq!(prices(item(4, 300)), (300, 0));
+        assert_eq!(prices(item(5, 0)), (1000, 0));
+        assert_eq!(prices(item(7, 0)), (0, 0));
+    }
+
+    #[test]
     fn shop_settings_reprice_and_hide() {
         let shop = ShopSettings {
             enforce_levels: true,
@@ -736,7 +776,7 @@ mod tests {
             prices: [(5, 1000)].into(),
             ..Default::default()
         };
-        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, xml: String::new() };
+        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new() };
         let cost = |mut item: CatalogItem| {
             shop.adjust(&mut item);
             item.cost
