@@ -9,7 +9,7 @@ use std::collections::btree_map::Entry;
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, fridge, inventory, perks};
+use super::{Conn, Outcome, Player, Session, active, chat, fridge, inventory, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{SkillSettings, SkillTree};
 use crate::messages as msg;
@@ -188,6 +188,8 @@ pub async fn study_course(session: &mut Session, message: &AfcMessage) -> Result
         let base = fridge::use_card(settings, player);
         inventory::use_piece(conn, player, id).await?;
         conn.log(&format!("   fridge card read at base {base}"));
+        let places = fridge::places(&settings.fridge, &player.data, base);
+        chat::system(conn, &format!("Карточка «Холод» прочитана: в холодильнике этой базы теперь {places} мест.")).await?;
         return Ok(Outcome::Answered);
     }
     let Some(item) = world.catalog.get(template).filter(|item| item.kind == COURSE_KIND) else {
@@ -217,8 +219,12 @@ pub async fn study_course(session: &mut Session, message: &AfcMessage) -> Result
         Course::Points(points) => {
             conn.log(&format!("   course {template}: +{points} points to skill {}", player.data.studying));
             give(conn, player, points).await?;
+            chat::system(conn, &format!("Курс прочитан: +{points} очков навыку на изучении.")).await?;
         }
-        Course::Nothing => conn.log(&format!("   course {template}: skill {perk} is known and not on study")),
+        Course::Nothing => {
+            conn.log(&format!("   course {template}: skill {perk} is known and not on study"));
+            chat::system(conn, "Курс прочитан, но его навык уже изучен и не стоит на изучении: очков он не дал.").await?;
+        }
     }
     Ok(Outcome::Answered)
 }

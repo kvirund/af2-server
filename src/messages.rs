@@ -2,6 +2,8 @@
 //! different things in each direction.
 
 pub const MONEY_CHANGED: i32 = 21;
+/// S→C a chat line; see `game::chat`.
+pub const CHAT: i32 = 50;
 pub const NPC_TALK: i32 = 60;
 pub const DIALOG_ANSWER: i32 = 65;
 /// Dialog text: string what to replace, string with what.

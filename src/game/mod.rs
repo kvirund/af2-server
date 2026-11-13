@@ -2,6 +2,7 @@
 //! and own the character they change.
 
 mod cards;
+mod chat;
 mod character;
 mod crafting;
 mod dialog;
