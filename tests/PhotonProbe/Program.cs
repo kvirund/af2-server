@@ -230,6 +230,9 @@ public sealed class Probe : IPhotonPeerListener
         probe.Pump(300);
         probe.Send(700, BitConverter.GetBytes(1110));
         probe.Pump(300);
+        // A taken offer leaves the taker's board: the income tab now shows one offer fewer.
+        probe.Send(700, BitConverter.GetBytes(1000));
+        probe.Pump(300);
 
         // PoplDrop bite request: rod 0, the sixth starter item as bait at offset 60. Repeat until the
         // random bite comes up, then land and keep the fish.

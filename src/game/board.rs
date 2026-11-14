@@ -347,15 +347,18 @@ pub async fn open(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         refresh(conn, offers, base, category, now_seconds());
         w.int32(taken as i32).int32(settings.board.max_taken as i32);
         w.date_time(local(offers.refresh_at));
-        for offer in &offers.offers {
+        // What a player has taken leaves their board; others still see it with one copy fewer.
+        let mut shown = 0;
+        for offer in offers.offers.iter().filter(|offer| !offer.takers.contains(&player.data.id)) {
             write_offer(&mut w, offer, offers.refresh_at);
+            shown += 1;
             let task = &offer.task;
             conn.log(&format!(
                 "     offer {}: text {}, colour {}, rep {}, species {}, target {} from {} g, bait {}, {}",
                 offer.id, task.task, task.quality, offer.reputation, task.species, task.target, task.min_grams, task.bait, task.reward
             ));
         }
-        offers.offers.len()
+        shown
     };
     conn.send(msg::BOARD, w.finish()).await?;
     conn.log(&format!("   -> 700 board of base {base}, tab {category}: {shown} offers, {taken} taken"));
