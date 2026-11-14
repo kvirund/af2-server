@@ -15,6 +15,7 @@ mod gathering;
 mod inventory;
 mod loot;
 mod keepnet;
+mod packages;
 mod panels;
 mod perks;
 mod refining;

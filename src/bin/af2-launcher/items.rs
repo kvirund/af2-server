@@ -24,6 +24,7 @@ struct Item {
     xml: String,
     /// What «Переработать» gives, as the client's refine window shows it.
     refine: String,
+    name: String,
 }
 
 fn pattern(text: &str) -> Regex {
@@ -61,6 +62,7 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
     let shop_count = pattern(r"(?m)^shopCount=(.*)$");
     let max_count = pattern(r"(?m)^maxcount=(.*)$");
     let refine = pattern(r"(?m)^refine=(.*)$");
+    let name = pattern(r"(?m)^iname=(.*)$");
     let definition = pattern(r"(?s)<wpn_add.*?</wpn_add>");
     let durability = pattern(r"(?s)<defDur>(.*?)</defDur>");
     let line_breaks = pattern(r"\\[rn]");
@@ -95,13 +97,14 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
             max_count: in_cell.max(1),
             xml,
             refine: capture(&refine, block).unwrap_or("").trim().to_string(),
+            name: capture(&name, block).unwrap_or("").trim().to_string(),
         });
     }
     Ok(items)
 }
 
 /// A file without this field was made by an older version and is made again.
-const CURRENT_FIELD: &str = "\"refine\"";
+const CURRENT_FIELD: &str = "\"name\"";
 
 /// Does nothing once the file exists: it only depends on the installed game.
 pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
@@ -125,7 +128,7 @@ pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
+    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\niname=Box\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
 
     #[test]
     fn extracts_every_field() {
@@ -141,6 +144,7 @@ mod tests {
             max_count: 1,
             xml: "<wpn_add><base><tid>7</tid><quality>0</quality><name>x</name></base><defDur>2.5</defDur></wpn_add>".into(),
             refine: "1391/1/100".into(),
+            name: "Box".into(),
         });
     }
 

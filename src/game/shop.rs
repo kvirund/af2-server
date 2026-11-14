@@ -135,7 +135,7 @@ mod tests {
     use crate::config::ShopStock;
 
     fn item(xml: &str) -> CatalogItem {
-        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: xml.to_owned(), refine: String::new() }
+        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: xml.to_owned(), refine: String::new(), name: String::new() }
     }
 
     #[test]
