@@ -114,7 +114,12 @@ pub struct BagSettings {
     pub start_cells: i32,
     pub storage_cells: i32,
     pub cells_per_purchase: i32,
-    pub purchase_money: i64,
+    /// The first way to pay: pieces of an item, `token_item` for the bags and
+    /// `storage_token_item` for the warehouse.
+    pub token_item: i32,
+    pub purchase_tokens: i32,
+    pub storage_token_item: i32,
+    pub storage_purchase_tokens: i32,
     pub purchase_premium: i64,
     /// Which item kinds (`wtype`) each page holds.
     pub page_kinds: BTreeMap<i32, Vec<i32>>,
@@ -356,10 +361,39 @@ pub struct Settings {
     pub vip: VipSettings,
     #[serde(default)]
     pub board: BoardSettings,
+    #[serde(default)]
+    pub spas: SpasSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
     pub starter_kit: Vec<StarterItem>,
+}
+
+/// The С.П.А.С. terminal.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpasSettings {
+    /// The terminal's NPC number in the base scenes and its dialog file.
+    pub npc: i32,
+    pub dialog: i32,
+    pub bases: Vec<i32>,
+    /// What a trophy fish is traded for: `trophy_tokens` pieces plus one for
+    /// every `grams_per_token`.
+    pub trophy_token: i32,
+    pub trophy_tokens: i32,
+    pub grams_per_token: i32,
+    /// Trophies listed one by one; the rest go with "all".
+    pub max_listed: usize,
+    pub patents: Vec<PatentSettings>,
+}
+
+/// A VIP patent in the terminal: the dialog answer, days and ergs.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatentSettings {
+    pub answer: i32,
+    pub days: i64,
+    pub premium: i64,
 }
 
 /// The boards of tasks at the bases.

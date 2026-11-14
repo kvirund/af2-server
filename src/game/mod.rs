@@ -21,6 +21,7 @@ mod refining;
 mod reputation;
 mod shop;
 mod skills;
+mod spas;
 mod travel;
 mod vip;
 mod vitals;
@@ -214,10 +215,14 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
             Some(outcome) => Ok(outcome),
             None => match generator::talk(session, message).await? {
                 Some(outcome) => Ok(outcome),
-                None => keepnet::open_market(session, message).await,
+                None => match spas::talk(session, message).await? {
+                    Some(outcome) => Ok(outcome),
+                    None => keepnet::open_market(session, message).await,
+                },
             },
         },
         msg::DIALOG_ANSWER if generator::is_open(session) => generator::answer(session, message).await,
+        msg::DIALOG_ANSWER if spas::is_open(session) => spas::answer(session, message).await,
         msg::DIALOG_ANSWER => doctor::answer(session, message).await,
         msg::REPUTATION => reputation::tab(session).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,

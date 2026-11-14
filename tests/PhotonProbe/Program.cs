@@ -310,6 +310,20 @@ public sealed class Probe : IPhotonPeerListener
             probe.Pump(100);
         }
 
+        // The С.П.А.С. terminal (NPC 2 here): currencies, trophies, all of them; patents, one day; leave.
+        // Answered by 70/72/74 each time, the trades by 173, 181 and 50, the patent by 21 and 260.
+        byte[] terminal = new byte[16];
+        BitConverter.TryWriteBytes(terminal.AsSpan(0), 2L);
+        probe.Send(60, terminal);
+        probe.Pump(300);
+        foreach (int answer in new[] { 5, 8, 10, 11, 4, 19, 1 })
+        {
+            byte[] reply = new byte[12];
+            BitConverter.TryWriteBytes(reply.AsSpan(0), answer);
+            probe.Send(65, reply);
+            probe.Pump(300);
+        }
+
         // Panel windows, warehouse, buying bag cells and moving part of a stack.
         using (var text = new MemoryStream())
         using (var writer = new BinaryWriter(text))

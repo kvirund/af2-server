@@ -9,7 +9,7 @@ use std::time::Instant;
 use anyhow::Result;
 use chrono::{DateTime, Local, TimeDelta, Utc};
 
-use super::{Conn, Outcome, Session, active as in_play, character, skills};
+use super::{Conn, Outcome, Player, Session, active as in_play, character, skills};
 use crate::afc::AfcWriter;
 use crate::messages as msg;
 use crate::storage::CharacterData;
@@ -65,6 +65,20 @@ pub async fn send_icon(conn: &Conn, character: &CharacterData) -> Result<()> {
     conn.send(msg::ACTIVE_ICONS, w.finish()).await
 }
 
+/// Takes the ergs and lengthens the patent by `days`; `false` if the ergs are
+/// short. Sends the new balance and the icon.
+pub async fn grant(conn: &Conn, player: &mut Player, days: i64, premium: i64) -> Result<bool> {
+    if days <= 0 || player.data.premium < premium {
+        return Ok(false);
+    }
+    player.data.premium -= premium;
+    player.data.vip_until = extended(player.data.vip_until, now_seconds(), days);
+    conn.save(player).await?;
+    character::send_money(conn, player, 0).await?;
+    send_icon(conn, &player.data).await?;
+    Ok(true)
+}
+
 /// Client 220 from the VIP window. Reply case 220: int 1 bought, -1 short of
 /// ergs; the new balance comes as 21.
 pub async fn buy(session: &mut Session) -> Result<Outcome> {
@@ -72,17 +86,12 @@ pub async fn buy(session: &mut Session) -> Result<Outcome> {
     let conn = &session.conn;
     let settings = &conn.world.settings.vip;
     let mut w = AfcWriter::new();
-    if settings.days <= 0 || player.data.premium < settings.premium_cost {
+    if !grant(conn, player, settings.days, settings.premium_cost).await? {
         w.int32(NO_MONEY);
         conn.send(msg::VIP_BUY, w.finish()).await?;
         conn.log(&format!("   -> 220 VIP: {} ergs, {} needed", player.data.premium, settings.premium_cost));
         return Ok(Outcome::Answered);
     }
-    player.data.premium -= settings.premium_cost;
-    player.data.vip_until = extended(player.data.vip_until, now_seconds(), settings.days);
-    conn.save(player).await?;
-    character::send_money(conn, player, 0).await?;
-    send_icon(conn, &player.data).await?;
     w.int32(BOUGHT);
     conn.send(msg::VIP_BUY, w.finish()).await?;
     conn.log(&format!("   -> 21, 260, 220 VIP bought until {}", player.data.vip_until));

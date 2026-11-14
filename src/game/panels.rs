@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 
-use super::{Outcome, Session, active, character};
+use super::{Outcome, Session, active, character, inventory};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::BagSettings;
 use crate::messages as msg;
@@ -14,7 +14,7 @@ use crate::storage::CharacterData;
 
 /// Bag id of the warehouse window.
 const STORAGE_BAG: i32 = 52;
-const PAY_MONEY: i32 = 1;
+const PAY_TOKENS: i32 = 1;
 const PAY_PREMIUM: i32 = 2;
 /// The client asks for its own card with this text.
 const OWN_CARD: &str = "?";
@@ -79,11 +79,25 @@ pub fn can_expand(settings: &BagSettings, bag: i32) -> bool {
     bag == STORAGE_BAG || (1..=settings.pages).contains(&bag)
 }
 
+/// What the cells of a bag are paid with: Trophy Hunter's tokens for the bags,
+/// Storekeeper's for the warehouse (guides 844577800 and 1102257736), or ergs.
+#[derive(Debug, PartialEq)]
+struct Price {
+    item: i32,
+    tokens: i32,
+    premium: i64,
+}
+
 /// Each purchase costs one step more than the one before it.
-fn price(settings: &BagSettings, character: &CharacterData, bag: i32) -> (i64, i64) {
+fn price(settings: &BagSettings, character: &CharacterData, bag: i32) -> Price {
     let bought = character.bag_extra.get(&bag).copied().unwrap_or(0) / settings.cells_per_purchase;
-    let step = i64::from(bought) + 1;
-    (settings.purchase_money * step, settings.purchase_premium * step)
+    let step = bought + 1;
+    let (item, tokens) = if bag == STORAGE_BAG {
+        (settings.storage_token_item, settings.storage_purchase_tokens)
+    } else {
+        (settings.token_item, settings.purchase_tokens)
+    };
+    Price { item, tokens: tokens * step, premium: settings.purchase_premium * i64::from(step) }
 }
 
 /// Client: int bag. Case 210: int bag, then the two ways to pay, each a string
@@ -98,24 +112,30 @@ pub async fn bag_price(session: &mut Session, message: &AfcMessage) -> Result<Ou
         return Ok(Outcome::Unanswered);
     }
 
-    let (money, premium) = price(settings, &player.data, bag);
+    let Price { item, tokens, premium } = price(settings, &player.data, bag);
     let mut w = AfcWriter::new();
-    w.int32(bag).string(&format!("{money}|0")).string(&format!("0|{premium}"));
+    w.int32(bag).string(&format!("0|0|{item}|{tokens}")).string(&format!("0|{premium}"));
     conn.send(msg::BAG_PRICE, w.finish()).await?;
-    conn.log(&format!("   -> 210 bag {bag} costs {money} or {premium} premium"));
+    conn.log(&format!("   -> 210 bag {bag} costs {tokens} of item {item} or {premium} premium"));
     Ok(Outcome::Answered)
 }
 
-/// Takes the price and adds the cells; `false` if the character cannot pay.
-fn expand(settings: &BagSettings, character: &mut CharacterData, bag: i32, method: i32) -> bool {
-    let (money, premium) = price(settings, character, bag);
-    match method {
-        PAY_MONEY if character.money >= money => character.money -= money,
-        PAY_PREMIUM if character.premium >= premium => character.premium -= premium,
-        _ => return false,
-    }
+/// What paying took from the bags: stacks left smaller and stacks used up.
+type Spent = (Vec<crate::storage::ItemEntry>, Vec<i64>);
+
+/// Takes the price and adds the cells; `None` if the character cannot pay.
+fn expand(settings: &BagSettings, character: &mut CharacterData, bag: i32, method: i32) -> Option<Spent> {
+    let Price { item, tokens, premium } = price(settings, character, bag);
+    let spent = match method {
+        PAY_TOKENS => inventory::take_carried(character, item, tokens)?,
+        PAY_PREMIUM if character.premium >= premium => {
+            character.premium -= premium;
+            Default::default()
+        }
+        _ => return None,
+    };
     *character.bag_extra.entry(bag).or_insert(0) += settings.cells_per_purchase;
-    true
+    Some(spent)
 }
 
 /// Client: int bag, int way to pay. Case 215 only plays a sound; the new size
@@ -127,14 +147,18 @@ pub async fn buy_cells(session: &mut Session, message: &AfcMessage) -> Result<Ou
     let conn = &session.conn;
     let settings = &conn.world.settings.bags;
 
-    let before = player.data.money;
-    if !can_expand(settings, bag) || !expand(settings, &mut player.data, bag, method) {
+    let spent = if can_expand(settings, bag) { expand(settings, &mut player.data, bag, method) } else { None };
+    let Some((smaller, gone)) = spent else {
         conn.log(&format!("   bag {bag}: payment {method} refused"));
         return Ok(Outcome::Unanswered);
-    }
+    };
 
     conn.save(player).await?;
-    character::send_money(conn, player, player.data.money - before).await?;
+    for id in gone {
+        inventory::send_removed(conn, id).await?;
+    }
+    inventory::send_updates(conn, player.data.id, &smaller).await?;
+    character::send_money(conn, player, 0).await?;
     character::send_update(conn, player).await?;
     conn.send(msg::BAG_BOUGHT, Vec::new()).await?;
     conn.log(&format!("   -> 21, 102, 215 bag {bag} now {} cells", cells_in(settings, &player.data, bag)));
@@ -151,7 +175,10 @@ mod tests {
             start_cells: 10,
             storage_cells: 45,
             cells_per_purchase: 5,
-            purchase_money: 500,
+            token_item: 1179,
+            purchase_tokens: 10,
+            storage_token_item: 1336,
+            storage_purchase_tokens: 5,
             purchase_premium: 10,
             page_kinds: Default::default(),
             other_page: 10,
@@ -160,23 +187,38 @@ mod tests {
         }
     }
 
+    fn tokens(template: i32, count: i32) -> crate::storage::ItemEntry {
+        crate::storage::ItemEntry { id: i64::from(template), template, bag: 1, cell: 0, count, durability: 0.0, param: 0 }
+    }
+
     #[test]
     fn each_purchase_adds_cells_and_costs_more() {
-        let mut character = CharacterData { money: 1500, ..Default::default() };
-        assert!(expand(&settings(), &mut character, 1, PAY_MONEY));
-        assert_eq!(character.money, 1000);
+        let mut character = CharacterData { items: vec![tokens(1179, 25)], ..Default::default() };
+        let (smaller, gone) = expand(&settings(), &mut character, 1, PAY_TOKENS).unwrap();
+        assert_eq!((smaller[0].count, gone.len()), (15, 0));
         assert_eq!(cells_in(&settings(), &character, 1), 15);
-        assert_eq!(price(&settings(), &character, 1), (1000, 20));
-        assert_eq!(price(&settings(), &character, 2), (500, 10));
+        assert_eq!(price(&settings(), &character, 1), Price { item: 1179, tokens: 20, premium: 20 });
+        assert_eq!(price(&settings(), &character, 2), Price { item: 1179, tokens: 10, premium: 10 });
+        assert!(expand(&settings(), &mut character, 1, PAY_TOKENS).is_none());
+    }
+
+    #[test]
+    fn the_warehouse_takes_storekeepers_tokens() {
+        let mut character = CharacterData { items: vec![tokens(1179, 50), tokens(1336, 5)], ..Default::default() };
+        assert_eq!(price(&settings(), &character, STORAGE_BAG), Price { item: 1336, tokens: 5, premium: 10 });
+        let (_, gone) = expand(&settings(), &mut character, STORAGE_BAG, PAY_TOKENS).unwrap();
+        assert_eq!(gone, vec![1336]);
+        assert_eq!(cells_in(&settings(), &character, STORAGE_BAG), 50);
     }
 
     #[test]
     fn a_purchase_needs_the_chosen_currency() {
         let mut character = CharacterData { money: 5000, premium: 9, ..Default::default() };
-        assert!(!expand(&settings(), &mut character, 1, PAY_PREMIUM));
-        assert!(!expand(&settings(), &mut character, 1, 3));
+        assert!(expand(&settings(), &mut character, 1, PAY_PREMIUM).is_none());
+        assert!(expand(&settings(), &mut character, 1, PAY_TOKENS).is_none());
+        assert!(expand(&settings(), &mut character, 1, 3).is_none());
         assert_eq!(cells_in(&settings(), &character, 1), 10);
-        assert_eq!(character.money, 5000);
+        assert_eq!(character.premium, 9);
     }
 
     #[test]
