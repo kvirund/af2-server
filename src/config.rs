@@ -267,7 +267,8 @@ pub struct LootSettings {
     pub premium_chance_percent: f64,
     #[serde(default = "one_each")]
     pub premium: [i64; 2],
-    /// Cards that come up with any fish of some species, like «Форель» with trout.
+    /// Cards that come up with any fish of some species, like «Форель» with trout;
+    /// no species at all means with any fish.
     #[serde(default)]
     pub species_cards: Vec<SpeciesCard>,
 }
@@ -398,10 +399,9 @@ pub struct Settings {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpasSettings {
-    /// The terminal's NPC number in the base scenes and its dialog file.
-    pub npc: i32,
+    /// Base to the terminal's NPC number in that base's scene, and its dialog file.
+    pub npcs: BTreeMap<i32, i32>,
     pub dialog: i32,
-    pub bases: Vec<i32>,
     /// What a trophy fish is traded for: `trophy_tokens` pieces plus one for
     /// every `grams_per_token`.
     pub trophy_token: i32,
@@ -733,6 +733,9 @@ pub struct CatalogItem {
     #[serde(default = "one")]
     pub max_count: i32,
     pub xml: String,
+    /// The `refine=` line: what «Переработать» turns the item into.
+    #[serde(default)]
+    pub refine: String,
     /// Price in ergs, the premium money, for an item with no price in credits:
     /// the `pricePt` of its description, set when the settings are applied.
     #[serde(skip)]
@@ -895,6 +898,7 @@ mod tests {
             max_count: 1,
             premium_cost: 0,
             xml: "<priceCr>0</priceCr><pricePt>20</pricePt>".into(),
+            refine: String::new(),
         };
         let prices = |mut item: CatalogItem| {
             shop.adjust(&mut item);
@@ -915,7 +919,7 @@ mod tests {
             prices: [(5, 1000)].into(),
             ..Default::default()
         };
-        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new() };
+        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new(), refine: String::new() };
         let cost = |mut item: CatalogItem| {
             shop.adjust(&mut item);
             item.cost

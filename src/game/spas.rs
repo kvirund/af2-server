@@ -1,5 +1,5 @@
-//! The С.П.А.С. terminal: NPC 2 in the base scenes from the Карасиный пруд on
-//! (in Убежище NPC 2 is the generator). Its dialog is the client's `3.lng`.
+//! The С.П.А.С. terminal: NPC 2 in the base scenes from the Пустошь on, NPC 3
+//! in Убежище (where NPC 2 is the generator). Its dialog is the client's `3.lng`.
 //!
 //! The root (node 1) offers help (answer 2, node 2), currencies (5, node 4) and
 //! patents (4, node 8). Currencies trade trophy fish from both keepnets for
@@ -45,7 +45,7 @@ const TOKENS_MARK: &str = "[m_cnt]";
 
 fn is_here(conn: &Conn, player: &Player, npc: i64) -> bool {
     let spas = &conn.world.settings.spas;
-    npc == i64::from(spas.npc) && spas.bases.contains(&travel::current_base(&conn.world.settings, player))
+    spas.npcs.get(&travel::current_base(&conn.world.settings, player)).is_some_and(|here| i64::from(*here) == npc)
 }
 
 /// Whether the dialog open is the terminal's.

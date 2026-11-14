@@ -105,8 +105,9 @@ fn free_place(
     (0..panels::cells_in(settings, character, page)).find(|cell| !taken(*cell)).map(|cell| (page, cell))
 }
 
-/// Older saves kept loose items in bag 0, which the client never draws. An item
-/// whose page is full waits there until the page has room.
+/// Older saves kept loose items in bag 0, which the client never draws, and
+/// some kinds on the other page («Разное») before they had a page of their own.
+/// An item whose page is full waits where it is until the page has room.
 pub fn move_old_backpack(
     settings: &BagSettings,
     character: &mut CharacterData,
@@ -114,11 +115,13 @@ pub fn move_old_backpack(
 ) -> usize {
     let mut moved = 0;
     for index in 0..character.items.len() {
-        if character.items[index].bag != OLD_BACKPACK_BAG {
+        let (id, template, bag) = (character.items[index].id, character.items[index].template, character.items[index].bag);
+        let kind = kind_of(template);
+        let misplaced = bag == settings.other_page && settings.page_for(kind) != settings.other_page;
+        if bag != OLD_BACKPACK_BAG && !misplaced {
             continue;
         }
-        let (id, template) = (character.items[index].id, character.items[index].template);
-        if let Some((bag, cell)) = free_place(settings, character, kind_of(template), Some(id), &[]) {
+        if let Some((bag, cell)) = free_place(settings, character, kind, Some(id), &[]) {
             (character.items[index].bag, character.items[index].cell) = (bag, cell);
             moved += 1;
         }
@@ -778,7 +781,7 @@ mod tests {
     use super::*;
 
     fn catalog_item(stacks: bool, cost: i64) -> CatalogItem {
-        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new() }
+        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new(), refine: String::new() }
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
@@ -952,6 +955,15 @@ mod tests {
         assert_eq!((character.items[0].bag, character.items[0].cell), (1, 0));
         assert_eq!((character.items[1].bag, character.items[1].cell), (2, 0));
         assert_eq!(character.items[2].bag, 100);
+    }
+
+    #[test]
+    fn items_left_on_the_other_page_move_to_their_own() {
+        let mut character = CharacterData { items: vec![stack(1, 2, 0, 1, 500), stack(2, 2, 1, 1, 600)], ..Default::default() };
+        let moved = move_old_backpack(&bags(), &mut character, |template| if template == 500 { 10 } else { 77 });
+        assert_eq!(moved, 1);
+        assert_eq!((character.items[0].bag, character.items[0].cell), (1, 0));
+        assert_eq!((character.items[1].bag, character.items[1].cell), (2, 1));
     }
 
     #[test]

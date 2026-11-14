@@ -59,7 +59,7 @@ pub async fn after_catch(conn: &Conn, player: &mut Player, species: i32) -> Resu
     if card_wanted(&conn.world.recipes, species) && happens(card_chance) {
         found.push((crafting::FISH_CARD, 1, species));
     }
-    for card in loot.species_cards.iter().filter(|card| card.species.contains(&species)) {
+    for card in loot.species_cards.iter().filter(|card| card.species.is_empty() || card.species.contains(&species)) {
         if happens(card.chance_percent) {
             found.push((card.item, 1, 0));
         }

@@ -154,7 +154,7 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     if moved > 0 || separated > 0 || counted > 0 {
         session.conn.save(player).await?;
         session.conn.log(&format!(
-            "   moved {moved} items from the old backpack onto pages, {separated} out of shared cells; {counted} old records counted as caught"
+            "   moved {moved} items from the old backpack or «Разное» onto their pages, {separated} out of shared cells; {counted} old records counted as caught"
         ));
     }
 

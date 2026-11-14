@@ -1,5 +1,5 @@
-//! Refining («Переработка» in an item's menu): an item whose description has
-//! `<refine>` breaks into other items, one piece at a time.
+//! Refining («Переработка» in an item's menu): an item whose `refine=` line
+//! names outputs breaks into other items, one piece at a time.
 
 use anyhow::Result;
 use rand::random;
@@ -13,13 +13,11 @@ const WORK_POINTS: f32 = 20.0;
 /// «Рефактор»: each level adds its `val` in percent to every chance.
 const REFACTOR: i32 = 133;
 
-/// `<refine>`: comma-separated "item/count/chance", the chance in percent. The
-/// client draws 100 as "всегда" and lower ones as "часто" down to "крайне редко".
-fn outputs(xml: &str) -> Vec<(i32, i32, f64)> {
-    let Some((_, rest)) = xml.split_once("<refine>") else {
-        return Vec::new();
-    };
-    let text = rest.split('<').next().unwrap_or("");
+/// The `refine=` line of the client's item table (not the `<refine>` inside the
+/// description, which is older and differs for cards, courses and a few more):
+/// comma-separated "item/count/chance", the chance in percent. The client draws
+/// 100 as "всегда" and lower ones as "часто" down to "крайне редко".
+fn outputs(text: &str) -> Vec<(i32, i32, f64)> {
     text.split(',')
         .filter_map(|one| {
             let mut fields = one.trim().split('/');
@@ -59,7 +57,7 @@ pub async fn refine(session: &mut Session, message: &AfcMessage) -> Result<Outco
         // The last piece went on the previous round.
         return reply(conn, "isend").await;
     };
-    let made = world.catalog.get(template).map(|item| outputs(&item.xml)).unwrap_or_default();
+    let made = world.catalog.get(template).map(|item| outputs(&item.refine)).unwrap_or_default();
     if made.is_empty() {
         return reply(conn, "norefine").await;
     }
@@ -105,11 +103,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn outputs_are_read_from_the_description() {
-        let xml = "<base><refine>1167/5/100,1206/1/100,1268/1/25</refine></base>";
-        assert_eq!(outputs(xml), vec![(1167, 5, 100.0), (1206, 1, 100.0), (1268, 1, 25.0)]);
-        assert!(outputs("<base><refine></refine></base>").is_empty());
-        assert!(outputs("<base></base>").is_empty());
+    fn outputs_are_read_from_the_refine_line() {
+        assert_eq!(outputs("1167/5/100,1206/1/100,1268/1/25"), vec![(1167, 5, 100.0), (1206, 1, 100.0), (1268, 1, 25.0)]);
+        assert!(outputs("").is_empty());
     }
 
     #[test]

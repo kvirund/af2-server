@@ -557,7 +557,7 @@ mod tests {
             stacks: false,
             shop_count: 1,
             max_count: 1,
-            premium_cost: 0, xml: format!("<basePar>{test}</basePar>"),
+            premium_cost: 0, xml: format!("<basePar>{test}</basePar>"), refine: String::new(),
         }
     }
 
