@@ -9,7 +9,7 @@ use super::{Conn, Outcome, Player, Session, active, inventory, reputation, trave
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
-use crate::storage::CaughtFish;
+use crate::storage::{CaughtFish, traits_text};
 
 pub const IN_USE_LIST: i32 = 0;
 const SPARE_LIST: i32 = 1;
@@ -33,7 +33,8 @@ pub fn write_fish(w: &mut AfcWriter, fish: &CaughtFish, mutants: &[i32]) {
     w.int64(fish.id).int32(fish.species).int32(fish.grams);
     w.int32(fish.size_class).int32(fish.bait).int32(fish.list);
     w.boolean(false).boolean(fish.size_class == TROPHY_CLASS).boolean(mutants.contains(&fish.species));
-    w.string("").string("");
+    // Individual traits, then species types (not kept: no recipe asks for one).
+    w.string(&traits_text(&fish.traits)).string("");
 }
 
 /// Case 174 empties the client's lists; case 175 appends records until the end.

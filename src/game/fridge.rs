@@ -171,7 +171,7 @@ mod tests {
     fn fish_on_ice_belong_to_one_base() {
         let mut character = CharacterData::default();
         for (id, list) in [(1, 0), (2, list_of(3)), (3, list_of(4)), (4, list_of(3))] {
-            character.fish.push(CaughtFish { id, species: 1, grams: 100, size_class: 0, bait: 0, list, experience: 0 });
+            character.fish.push(CaughtFish { id, species: 1, grams: 100, size_class: 0, bait: 0, list, experience: 0, traits: Vec::new() });
         }
         let ids: Vec<i64> = on_ice(&character, 3).map(|fish| fish.id).collect();
         assert_eq!(ids, vec![2, 4]);

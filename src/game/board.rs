@@ -144,6 +144,13 @@ fn pick_species<'a>(pool: &[&'a Species], roll: f64) -> &'a Species {
     pool[pool.len() - 1]
 }
 
+/// What resource tasks on this base's board may give.
+fn resource_items(board: &BoardSettings, base: i32) -> Vec<i32> {
+    let mut items = board.resource_items.clone();
+    items.extend(board.base_resource_items.get(&base).into_iter().flatten());
+    items
+}
+
 /// One offer: the fish, what of it, and the reward, which grows with the
 /// worth and experience of the fish asked for.
 fn make_offer(settings: &Settings, fish: &FishTable, base: i32, category: i32, ends_at: i64, roll: &mut impl FnMut() -> f64) -> Option<BoardOffer> {
@@ -179,8 +186,11 @@ fn make_offer(settings: &Settings, fish: &FishTable, base: i32, category: i32, e
     let mut reward = Vec::new();
     match category {
         INCOME => reward.push(format!("money={}", (worth * board.income_percent / 100.0 * size).round() as i64)),
-        RESOURCES if !board.resource_items.is_empty() => {
-            reward.push(format!("wpn={}/{}", pick(roll(), &board.resource_items), quality + 1));
+        RESOURCES => {
+            let items = resource_items(board, base);
+            if !items.is_empty() {
+                reward.push(format!("wpn={}/{}", pick(roll(), &items), quality + 1));
+            }
         }
         EXPERIENCE => {
             reward.push(format!("exp={}", (experience * board.experience_percent / 100.0 * size).round() as i64));
@@ -567,7 +577,7 @@ mod tests {
     }
 
     fn fish(grams: i32, size_class: i32, bait: i32) -> CaughtFish {
-        CaughtFish { id: 1, species: 7, grams, size_class, bait, list: 0, experience: 1 }
+        CaughtFish { id: 1, species: 7, grams, size_class, bait, list: 0, experience: 1, traits: Vec::new() }
     }
 
     #[test]
@@ -591,6 +601,17 @@ mod tests {
         assert_eq!(quality_of(&weights, 0.999), 4);
         assert_eq!(between(0.0, [3, 8]), 3);
         assert_eq!(between(0.999, [3, 8]), 8);
+    }
+
+    #[test]
+    fn lake_boards_add_their_own_rewards() {
+        let board = BoardSettings {
+            resource_items: vec![1244],
+            base_resource_items: [(4, vec![1314, 1330])].into_iter().collect(),
+            ..Default::default()
+        };
+        assert_eq!(resource_items(&board, 4), vec![1244, 1314, 1330]);
+        assert_eq!(resource_items(&board, 6), vec![1244]);
     }
 
     #[test]

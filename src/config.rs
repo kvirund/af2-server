@@ -67,6 +67,20 @@ pub struct FishingSettings {
     /// The heaviest fish that bites, as a multiple of the weakest test of the
     /// rod, reel and line; 0 for no limit.
     pub tackle_weight_factor: f64,
+    /// Individual traits a landed fish may have.
+    #[serde(default)]
+    pub traits: Vec<TraitSettings>,
+}
+
+/// One individual trait: which species may have it, from what weight, how often.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraitSettings {
+    #[serde(rename = "trait")]
+    pub trait_id: i32,
+    pub species: Vec<i32>,
+    pub min_grams: i32,
+    pub percent: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,6 +267,17 @@ pub struct LootSettings {
     pub premium_chance_percent: f64,
     #[serde(default = "one_each")]
     pub premium: [i64; 2],
+    /// Cards that come up with any fish of some species, like «Форель» with trout.
+    #[serde(default)]
+    pub species_cards: Vec<SpeciesCard>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeciesCard {
+    pub item: i32,
+    pub species: Vec<i32>,
+    pub chance_percent: f64,
 }
 
 fn one_each() -> [i64; 2] {
@@ -433,6 +458,9 @@ pub struct BoardSettings {
     pub daily_experience_percent: f64,
     /// Resource tasks give colour plus one pieces of one of these.
     pub resource_items: Vec<i32>,
+    /// Base id to more resource rewards found only on that base's board.
+    #[serde(default)]
+    pub base_resource_items: BTreeMap<i32, Vec<i32>>,
 }
 
 /// The VIP patent: its price and what it gives.

@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS fish (
     size_class INTEGER NOT NULL,
     list INTEGER NOT NULL,
     experience INTEGER NOT NULL,
-    bait INTEGER NOT NULL
+    bait INTEGER NOT NULL,
+    traits TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS records (

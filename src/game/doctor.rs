@@ -251,7 +251,7 @@ mod tests {
     use super::*;
 
     fn fish(id: i64, grams: i32, list: i32) -> CaughtFish {
-        CaughtFish { id, species: 1, grams, size_class: 0, bait: 0, list, experience: 0 }
+        CaughtFish { id, species: 1, grams, size_class: 0, bait: 0, list, experience: 0, traits: Vec::new() }
     }
 
     #[test]

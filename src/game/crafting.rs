@@ -169,19 +169,21 @@ struct Taken {
 const ANY_MUTANT: i32 = -1;
 
 /// The client's own test: 0 takes any fish but a mutant, -1 only a mutant.
-fn fish_fits(fish: &CaughtFish, species: i32, min: i32, max: i32, mutants: &[i32]) -> bool {
+/// A trait other than 0 (the ingredient's sixth number) must be on the fish:
+/// the recipes use only 108 «Красная икра». The client also accepts species
+/// types below 100 there, which no recipe asks for and the server does not keep.
+fn fish_fits(fish: &CaughtFish, species: i32, min: i32, max: i32, trait_id: i32, mutants: &[i32]) -> bool {
     let mutant = mutants.contains(&fish.species);
     let kind = match species {
         ANY_FISH => !mutant,
         ANY_MUTANT => mutant,
         exact => fish.species == exact,
     };
-    kind && (min <= 0 || fish.grams >= min) && (max <= 0 || fish.grams <= max)
+    kind && (min <= 0 || fish.grams >= min) && (max <= 0 || fish.grams <= max) && (trait_id == 0 || fish.traits.contains(&trait_id))
 }
 
 /// The items and fish a recipe would use, or `None` if something is missing.
-/// Fish go lightest first, so the big ones stay for other recipes. The rarer
-/// conditions in the sixth number are not modelled and never match.
+/// Fish go lightest first, so the big ones stay for other recipes.
 fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) -> Option<Taken> {
     let mut taken = Taken::default();
     for ingredient in &recipe.ingredients {
@@ -206,14 +208,14 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) 
                 return None;
             }
         } else {
-            let (min, max, other) = (ingredient[3] as i32, ingredient[4] as i32, ingredient[5] as i32);
-            if id < ANY_MUTANT || other != 0 {
+            let (min, max, trait_id) = (ingredient[3] as i32, ingredient[4] as i32, ingredient[5] as i32);
+            if id < ANY_MUTANT {
                 return None;
             }
             let mut fitting: Vec<&CaughtFish> = character
                 .fish
                 .iter()
-                .filter(|fish| keepnet::in_keepnet(fish) && !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max, mutants))
+                .filter(|fish| keepnet::in_keepnet(fish) && !taken.fish.contains(&fish.id) && fish_fits(fish, id, min, max, trait_id, mutants))
                 .collect();
             if fitting.len() < need as usize {
                 return None;
@@ -336,7 +338,7 @@ mod tests {
     use crate::storage::ItemEntry;
 
     fn fish(id: i64, species: i32, grams: i32) -> CaughtFish {
-        CaughtFish { id, species, grams, size_class: 0, bait: 0, list: 0, experience: 1 }
+        CaughtFish { id, species, grams, size_class: 0, bait: 0, list: 0, experience: 1, traits: Vec::new() }
     }
 
     fn held(id: i64, template: i32, count: i32, bag: i32) -> ItemEntry {
@@ -391,6 +393,16 @@ mod tests {
         let any = needing(vec![[0.0, 1.0, 1.0, 100.0, 3000.0, 0.0]]);
         assert_eq!(ingredients_for(&character, &any, &[339]).unwrap().fish, vec![1]);
         assert_eq!(ingredients_for(&character, &mutant, &[]), None);
+    }
+
+    #[test]
+    fn the_caviar_cut_takes_only_a_fish_with_caviar() {
+        let caviar = CaughtFish { traits: vec![108], ..fish(2, 95, 3500) };
+        let plain = CharacterData { fish: vec![fish(1, 95, 4000)], ..Default::default() };
+        let recipe = needing(vec![[0.0, 1.0, 1.0, 0.0, 0.0, 108.0]]);
+        assert_eq!(ingredients_for(&plain, &recipe, &[]), None);
+        let with = CharacterData { fish: vec![fish(1, 95, 4000), caviar], ..Default::default() };
+        assert_eq!(ingredients_for(&with, &recipe, &[]).unwrap().fish, vec![2]);
     }
 
     fn recipe(station: i32, show: i32) -> Recipe {

@@ -38,6 +38,19 @@ pub struct CaughtFish {
     pub list: i32,
     /// Experience before the personal-record multiplier.
     pub experience: i32,
+    /// Individual traits (`type_100`..`type_108` in the client's fishLang.txt),
+    /// such as 108 «Красная икра» that the caviar recipe asks for.
+    pub traits: Vec<i32>,
+}
+
+/// Traits as the client and the database spell them: numbers and commas.
+pub fn traits_text(traits: &[i32]) -> String {
+    traits.iter().map(i32::to_string).collect::<Vec<_>>().join(",")
+}
+
+/// The other way round; anything that is not a number is dropped.
+pub fn parse_traits(text: &str) -> Vec<i32> {
+    text.split(',').filter_map(|part| part.trim().parse().ok()).collect()
 }
 
 /// The heaviest fish of a species kept, and where and on what it was caught.

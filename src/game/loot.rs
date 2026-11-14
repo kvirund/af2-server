@@ -59,6 +59,11 @@ pub async fn after_catch(conn: &Conn, player: &mut Player, species: i32) -> Resu
     if card_wanted(&conn.world.recipes, species) && happens(card_chance) {
         found.push((crafting::FISH_CARD, 1, species));
     }
+    for card in loot.species_cards.iter().filter(|card| card.species.contains(&species)) {
+        if happens(card.chance_percent) {
+            found.push((card.item, 1, 0));
+        }
+    }
     let base = travel::current_base(settings, player);
     if let Some(card) = loot.base_cards.get(&base)
         && happens(loot.base_card_chance_percent * reputation::base_bonus(settings, player, per_level.base_card_percent))

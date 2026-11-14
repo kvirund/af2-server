@@ -5,7 +5,10 @@ use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use sqlx::{Sqlite, Transaction};
 
-use super::{BoardTask, Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals};
+use super::{
+    BoardTask, Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals,
+    parse_traits, traits_text,
+};
 
 const MAX_CONNECTIONS: u32 = 4;
 
@@ -37,6 +40,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "records", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
     add_column(pool, "items", "param", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "characters", "vip_until", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "fish", "traits", "TEXT NOT NULL DEFAULT ''").await?;
     Ok(())
 }
 
@@ -88,7 +92,7 @@ impl SqliteStorage {
                 .await?;
         }
         for fish in &character.fish {
-            sqlx::query("INSERT INTO fish (id, character_id, species, grams, size_class, list, experience, bait) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO fish (id, character_id, species, grams, size_class, list, experience, bait, traits) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(fish.id)
                 .bind(id)
                 .bind(fish.species)
@@ -97,6 +101,7 @@ impl SqliteStorage {
                 .bind(fish.list)
                 .bind(fish.experience)
                 .bind(fish.bait)
+                .bind(traits_text(&fish.traits))
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -255,8 +260,8 @@ impl Storage for SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
 
-        let fish: Vec<(i64, i32, i32, i32, i32, i32, i32)> = sqlx::query_as(
-            "SELECT id, species, grams, size_class, list, experience, bait FROM fish WHERE character_id = ? ORDER BY id",
+        let fish: Vec<(i64, i32, i32, i32, i32, i32, i32, String)> = sqlx::query_as(
+            "SELECT id, species, grams, size_class, list, experience, bait, traits FROM fish WHERE character_id = ? ORDER BY id",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -337,7 +342,7 @@ impl Storage for SqliteStorage {
                 .collect(),
             fish: fish
                 .into_iter()
-                .map(|(id, species, grams, size_class, list, experience, bait)| CaughtFish {
+                .map(|(id, species, grams, size_class, list, experience, bait, traits)| CaughtFish {
                     id,
                     species,
                     grams,
@@ -345,6 +350,7 @@ impl Storage for SqliteStorage {
                     bait,
                     list,
                     experience,
+                    traits: parse_traits(&traits),
                 })
                 .collect(),
             records: records
@@ -495,7 +501,7 @@ mod tests {
             vip_until: 1_800_000_000,
             vitals: Some(Vitals { values: [90.0, 80.5, 70.0, 60.0, 50.0], work_points: 12.5 }),
             items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010, param: 0 }, ItemEntry { id: 3, bag: 1, cell: 4, count: 2, durability: 1.0, template: 1309, param: 77 }],
-            fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12 }],
+            fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12, traits: vec![108] }],
             ..Default::default()
         };
         character.records.insert(7, Record { grams: 300, location: 4, bait: 1016 });

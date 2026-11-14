@@ -12,7 +12,7 @@ use rand::random;
 
 use super::{Bite, Outcome, Session, active, board, cards, character, keepnet, inventory, loot, reputation, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
+use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species, TraitSettings};
 use crate::messages as msg;
 use crate::storage::{CaughtFish, ItemEntry, Record, UNKNOWN_BAIT};
 
@@ -309,6 +309,15 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     Ok(Outcome::Answered)
 }
 
+/// The individual traits a fish comes up with, each rolled on its own.
+fn traits_for(traits: &[TraitSettings], species: i32, grams: i32, roll: &mut impl FnMut() -> f64) -> Vec<i32> {
+    traits
+        .iter()
+        .filter(|one| one.species.contains(&species) && grams >= one.min_grams && roll() * 100.0 < one.percent)
+        .map(|one| one.trait_id)
+        .collect()
+}
+
 pub fn experience_for(progression: &ProgressionSettings, grams: i32, size_class: i32, education: f64) -> i32 {
     let size = match size_class {
         TROPHY_CLASS => progression.trophy_experience_factor,
@@ -342,6 +351,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
         bait: bite.bait,
         list: keepnet::IN_USE_LIST,
         experience: experience_for(progression, bite.grams, bite.size_class, education),
+        traits: traits_for(&conn.world.settings.fishing.traits, bite.species, bite.grams, &mut random),
     };
     let is_record = bite.grams > player.data.records.get(&bite.species).map_or(0, |record| record.grams);
     let record = if is_record { progression.record_experience_factor } else { 1 };
@@ -446,7 +456,17 @@ mod tests {
             max_stamina: 60.0,
             hardy_stamina_factor: 1.4,
             tackle_weight_factor: 1.5,
+            traits: vec![],
         }
+    }
+
+    #[test]
+    fn caviar_comes_only_in_big_fish_of_its_species() {
+        let caviar = [TraitSettings { trait_id: 108, species: vec![95], min_grams: 3000, percent: 50.0 }];
+        assert_eq!(traits_for(&caviar, 95, 3500, &mut || 0.2), vec![108]);
+        assert!(traits_for(&caviar, 95, 3500, &mut || 0.7).is_empty());
+        assert!(traits_for(&caviar, 95, 2900, &mut || 0.0).is_empty());
+        assert!(traits_for(&caviar, 7, 9000, &mut || 0.0).is_empty());
     }
 
     fn species() -> Species {
