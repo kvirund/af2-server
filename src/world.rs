@@ -1,16 +1,17 @@
 //! What every connection shares. A character's own state belongs to its
 //! connection's task, so game code needs no locks.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::Local;
 use tokio::sync::Notify;
 
 use crate::config::{Catalog, FishTable, Recipe, Settings};
-use crate::storage::{Storage, StoredGatherPoint};
+use crate::storage::{BoardTask, Storage, StoredGatherPoint};
 
 pub struct Log {
     trace: Option<Mutex<File>>,
@@ -64,6 +65,26 @@ impl OnlineCharacters {
     }
 }
 
+/// The offers of one tab of a base's board. Every player sees the same ones;
+/// they live only while the server runs.
+#[derive(Debug, Default)]
+pub struct BoardOffers {
+    /// When new offers replace these, Unix seconds.
+    pub refresh_at: i64,
+    pub offers: Vec<BoardOffer>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BoardOffer {
+    pub id: i64,
+    /// What the character gets on taking it, but for its own id.
+    pub task: BoardTask,
+    /// The base reputation level it asks for.
+    pub reputation: i32,
+    pub copies: i32,
+    pub takers: HashSet<i64>,
+}
+
 /// A gather point of a base scene. Every player sees the same ones.
 pub struct GatherPoint {
     pub kind: i32,
@@ -78,6 +99,9 @@ pub struct World {
     pub settings: Settings,
     /// Base to its points, filled the first time anyone is at that base.
     pub gather_points: Mutex<HashMap<i32, BTreeMap<i32, GatherPoint>>>,
+    /// Base and tab to its offers, made the first time anyone looks.
+    pub boards: Mutex<HashMap<(i32, i32), BoardOffers>>,
+    next_offer: AtomicI64,
     pub fish: FishTable,
     pub catalog: Catalog,
     pub recipes: Vec<Recipe>,
@@ -98,6 +122,8 @@ impl World {
         Self {
             settings,
             gather_points: Mutex::default(),
+            boards: Mutex::default(),
+            next_offer: AtomicI64::new(1),
             fish,
             catalog,
             recipes,
@@ -115,6 +141,11 @@ impl World {
 
     pub fn release(&self, character: i64, connection: u64) {
         self.online.release(character, connection);
+    }
+
+    /// Offers live only while the server runs, so their ids need not last.
+    pub fn next_offer_id(&self) -> i64 {
+        self.next_offer.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Puts back the gather points kept from the last run.

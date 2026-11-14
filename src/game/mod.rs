@@ -1,6 +1,7 @@
 //! Game rules, one file per system. Handlers run on the connection's own task
 //! and own the character they change.
 
+mod board;
 mod cards;
 mod chat;
 mod character;
@@ -244,6 +245,9 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::ITEM_USE => vitals::use_item(session, message).await,
         msg::FISH_PRICES => keepnet::prices(session, message).await,
         msg::FISH_SELL => keepnet::sell(session, message).await,
+        msg::BOARD => board::open(session, message).await,
+        msg::BOARD_REFUSE => board::refuse(session, message).await,
+        msg::BOARD_TAKE => board::take(session, message).await,
         msg::VIP_BUY => vip::buy(session).await,
 
         _ => Ok(Outcome::Unanswered),

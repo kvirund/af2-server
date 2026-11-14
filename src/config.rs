@@ -354,10 +354,51 @@ pub struct Settings {
     pub reputation: ReputationSettings,
     #[serde(default)]
     pub vip: VipSettings,
+    #[serde(default)]
+    pub board: BoardSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
     pub starter_kit: Vec<StarterItem>,
+}
+
+/// The boards of tasks at the bases.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardSettings {
+    /// Offers on each tab but the daily one.
+    pub offers: usize,
+    pub daily_offers: usize,
+    /// How long a tab's offers stay before new ones come.
+    pub refresh_minutes: i64,
+    pub daily_refresh_minutes: i64,
+    /// Tasks of one tab a character holds at once.
+    pub max_taken: usize,
+    /// Between two daily tasks taken.
+    pub daily_cooldown_minutes: i64,
+    /// How many players can take one offer, from and to.
+    pub copies: [i32; 2],
+    /// Chances of the colours, black to gold.
+    pub quality_weights: Vec<f64>,
+    /// The base reputation level each colour asks for.
+    pub quality_reputation: Vec<i32>,
+    /// Each colour step adds this to the task's size and reward.
+    pub quality_percent: f64,
+    /// Fish to catch, from and to, before the colour.
+    pub count: [i32; 2],
+    /// Fish whose typical weight makes the target of a weighed task.
+    pub weight_count: [i32; 2],
+    pub trophies: [i32; 2],
+    /// Income tasks pay this share of what the fish would sell for.
+    pub income_percent: f64,
+    /// Experience tasks give this share of the fish's own experience.
+    pub experience_percent: f64,
+    /// Base reputation per colour step plus one.
+    pub reputation_points: i64,
+    pub daily_income_percent: f64,
+    pub daily_experience_percent: f64,
+    /// Resource tasks give colour plus one pieces of one of these.
+    pub resource_items: Vec<i32>,
 }
 
 /// The VIP patent: its price and what it gives.

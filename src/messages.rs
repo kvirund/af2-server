@@ -99,6 +99,21 @@ pub const HEARTBEAT: i32 = 255;
 pub const ACTIVE_ICONS: i32 = 260;
 /// C→S int 0 from the VIP window's button; S→C int 1 bought, -1 not enough ergs.
 pub const VIP_BUY: i32 = 220;
+/// C→S int tab: the board of tasks. S→C its offers; see `game::board`.
+pub const BOARD: i32 = 700;
+/// C→S int tab: give up that tab's tasks. S→C the tournaments.
+pub const BOARD_REFUSE: i32 = 705;
+pub const TOURNAMENTS: i32 = 705;
+/// C→S long offer; S→C the answer as one `key=value` line.
+pub const BOARD_TAKE: i32 = 710;
+/// S→C {int command, long id} until the end: what happened to tasks.
+pub const TASK_EVENTS: i32 = 670;
+/// S→C long fish: taken by a task out of the keepnet.
+pub const TASK_FISH: i32 = 672;
+/// S→C all tasks, after clearing the old ones.
+pub const TASKS: i32 = 675;
+/// S→C tasks added or changed.
+pub const TASK_UPDATES: i32 = 680;
 pub const FISH_SWAP_KEEPNETS: i32 = 285;
 pub const FISH_RELEASE: i32 = 286;
 pub const REFINE: i32 = 290;

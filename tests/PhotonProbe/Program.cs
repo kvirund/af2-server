@@ -68,6 +68,8 @@ public sealed class Probe : IPhotonPeerListener
         Pump(500);
     }
 
+    private static long FirstOffer;
+
     private static void Report(string kind, Dictionary<byte, object> parameters)
     {
         object? id = parameters.TryGetValue(ParamMsgId, out object? v) ? v : null;
@@ -78,6 +80,11 @@ public sealed class Probe : IPhotonPeerListener
             LastFishId = BitConverter.ToInt64(payload, 4);
             LastSpecies = BitConverter.ToInt32(payload, 12);
             LastSizeClass = BitConverter.ToInt32(payload, 20);
+        }
+        // Board: int taken, int most, 6 x short date, then offers starting with long id.
+        if (id is int and 700 && payload.Length >= 28)
+        {
+            FirstOffer = BitConverter.ToInt64(payload, 20);
         }
         if (id is int and 110 && payload.Length >= 8)
         {
@@ -209,6 +216,20 @@ public sealed class Probe : IPhotonPeerListener
         // UIVIPWindow.buyVIP(): int 0. Answered by 220 (1 bought, -1 short of ergs).
         probe.Send(220, [0, 0, 0, 0]);
         probe.Pump(500);
+
+        // Board of the base: open the income and daily tabs and take the first offer of each.
+        // Answered by 700, then 710 "ok=1", 680 and 670.
+        foreach (int tab in new[] { 1000, 1100 })
+        {
+            probe.Send(700, BitConverter.GetBytes(tab));
+            probe.Pump(500);
+            probe.Send(710, BitConverter.GetBytes(FirstOffer));
+            probe.Pump(500);
+        }
+        probe.Send(710, BitConverter.GetBytes(FirstOffer));
+        probe.Pump(300);
+        probe.Send(700, BitConverter.GetBytes(1110));
+        probe.Pump(300);
 
         // PoplDrop bite request: rod 0, the sixth starter item as bait at offset 60. Repeat until the
         // random bite comes up, then land and keep the fish.

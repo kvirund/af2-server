@@ -84,6 +84,24 @@ CREATE TABLE IF NOT EXISTS skills (
     PRIMARY KEY (character_id, perk)
 );
 
+CREATE TABLE IF NOT EXISTS board_tasks (
+    id INTEGER PRIMARY KEY,
+    character_id INTEGER NOT NULL REFERENCES characters (id),
+    base INTEGER NOT NULL,
+    category INTEGER NOT NULL,
+    task INTEGER NOT NULL,
+    quality INTEGER NOT NULL,
+    title INTEGER NOT NULL,
+    species INTEGER NOT NULL,
+    bait INTEGER NOT NULL,
+    target INTEGER NOT NULL,
+    min_grams INTEGER NOT NULL,
+    max_grams INTEGER NOT NULL,
+    progress INTEGER NOT NULL,
+    reward TEXT NOT NULL,
+    ends_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS quest_values (
     character_id INTEGER NOT NULL REFERENCES characters (id),
     name TEXT NOT NULL,

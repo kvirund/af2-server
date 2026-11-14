@@ -10,7 +10,7 @@ use anyhow::Result;
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, cards, character, keepnet, inventory, loot, reputation, vip, vitals, perks};
+use super::{Bite, Outcome, Session, active, board, cards, character, keepnet, inventory, loot, reputation, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species};
 use crate::messages as msg;
@@ -18,8 +18,8 @@ use crate::storage::{CaughtFish, ItemEntry, Record, UNKNOWN_BAIT};
 
 pub const DEFAULT_LOCATION: i32 = 4;
 
-const TROPHY_CLASS: i32 = 2;
-const LARGE_CLASS: i32 = 1;
+pub const TROPHY_CLASS: i32 = 2;
+pub const LARGE_CLASS: i32 = 1;
 
 /// Rod, two three-double vectors.
 const DEPTH_OFFSET: usize = 4 + 24 + 24;
@@ -309,7 +309,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     Ok(Outcome::Answered)
 }
 
-fn experience_for(progression: &ProgressionSettings, grams: i32, size_class: i32, education: f64) -> i32 {
+pub fn experience_for(progression: &ProgressionSettings, grams: i32, size_class: i32, education: f64) -> i32 {
     let size = match size_class {
         TROPHY_CLASS => progression.trophy_experience_factor,
         LARGE_CLASS => progression.large_experience_factor,
@@ -392,6 +392,8 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let record = if is_record { settings.progression.record_experience_factor } else { 1 };
     let multiplier = f64::from(record) * vip::multiplier(&player.data, settings.vip.experience_percent);
     let experience = fish.experience;
+    // "Без квеста" in the catch window sends 1136; record fish go to no task.
+    let for_tasks = (message.id == msg::FISH_KEPT && !is_record).then(|| fish.clone());
     player.data.fish.push(fish);
 
     let mut w = AfcWriter::new();
@@ -400,6 +402,9 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 
     character::award_experience(conn, player, experience, multiplier).await?;
     conn.log(&format!("   -> 1135 kept fish {id}, record: {is_record}"));
+    if let Some(fish) = for_tasks {
+        board::fish_kept(conn, player, &fish).await?;
+    }
     Ok(Outcome::Answered)
 }
 

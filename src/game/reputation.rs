@@ -106,6 +106,9 @@ pub async fn add(conn: &Conn, player: &mut Player, faction: i32, points: i64) ->
         w.int32(faction).int32(reached);
         conn.send(msg::REPUTATION_LEVEL, w.finish()).await?;
     }
+    if level > was {
+        super::board::send_reputation_levels(conn, player).await?;
+    }
     let mut w = AfcWriter::new();
     w.int32(faction).int32(level).int32(into as i32).int32(points as i32);
     conn.send(msg::REPUTATION_GAINED, w.finish()).await?;

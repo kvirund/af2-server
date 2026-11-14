@@ -123,6 +123,11 @@ fn price_per_kg(market: &FishMarketSettings, largest_share: f64, species: &Speci
     (market.base_price_per_kg * rarity * size).round() as i32
 }
 
+/// What `grams` of a species of a size class sells for.
+pub fn value_of(world_fish: &crate::config::FishTable, market: &FishMarketSettings, species: &Species, grams: i32, size_class: i32) -> i64 {
+    lot_total(grams, price_per_kg(market, world_fish.largest_share(), species, size_class))
+}
+
 fn lot_total(grams: i32, price_per_kg: i32) -> i64 {
     (f64::from(grams) / 1000.0 * f64::from(price_per_kg)).round() as i64
 }

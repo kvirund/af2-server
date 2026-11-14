@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use sqlx::{Sqlite, Transaction};
 
-use super::{Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals};
+use super::{BoardTask, Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals};
 
 const MAX_CONNECTIONS: u32 = 4;
 
@@ -132,6 +132,26 @@ impl SqliteStorage {
                 .bind(id)
                 .bind(recipe)
                 .bind(uses)
+                .execute(&mut **transaction)
+                .await?;
+        }
+        for task in &character.board_tasks {
+            sqlx::query("INSERT INTO board_tasks (id, character_id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(task.id)
+                .bind(id)
+                .bind(task.base)
+                .bind(task.category)
+                .bind(task.task)
+                .bind(task.quality)
+                .bind(task.title)
+                .bind(task.species)
+                .bind(task.bait)
+                .bind(task.target)
+                .bind(task.min_grams)
+                .bind(task.max_grams)
+                .bind(task.progress)
+                .bind(&task.reward)
+                .bind(task.ends_at)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -272,6 +292,14 @@ impl Storage for SqliteStorage {
                 .fetch_all(&self.pool)
                 .await?;
 
+        #[allow(clippy::type_complexity)]
+        let board_tasks: Vec<(i64, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, String, i64)> = sqlx::query_as(
+            "SELECT id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at FROM board_tasks WHERE character_id = ? ORDER BY id",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+
         let quest_values: Vec<(String, i32)> =
             sqlx::query_as("SELECT name, value FROM quest_values WHERE character_id = ?")
                 .bind(id)
@@ -331,6 +359,25 @@ impl Storage for SqliteStorage {
             reputation: reputation.into_iter().collect(),
             studying,
             healed_at,
+            board_tasks: board_tasks
+                .into_iter()
+                .map(|(id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at)| BoardTask {
+                    id,
+                    base,
+                    category,
+                    task,
+                    quality,
+                    title,
+                    species,
+                    bait,
+                    target,
+                    min_grams,
+                    max_grams,
+                    progress,
+                    reward,
+                    ends_at,
+                })
+                .collect(),
         }))
     }
 
@@ -355,7 +402,7 @@ impl Storage for SqliteStorage {
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
-        for table in ["items", "fish", "records", "catches", "bag_extra", "known_recipes", "skills", "quest_values", "reputation"] {
+        for table in ["items", "fish", "records", "catches", "bag_extra", "known_recipes", "skills", "quest_values", "reputation", "board_tasks"] {
             sqlx::query(&format!("DELETE FROM {table} WHERE character_id = ?"))
                 .bind(character.id)
                 .execute(&mut *transaction)
@@ -459,6 +506,7 @@ mod tests {
         character.studying = 100;
         character.healed_at = 1_700_000_000;
         character.quest_values.insert("holod_1".into(), 3);
+        character.board_tasks.push(BoardTask { id: 900, base: 1, category: 1000, task: 2, target: 5, reward: "money=100".into(), ..Default::default() });
         character.reputation.insert(1, 450);
         character.id = store.create_character(&character).await.unwrap();
 

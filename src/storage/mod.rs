@@ -108,6 +108,38 @@ pub struct CharacterData {
     pub vip_until: i64,
     /// `None` until the character first enters the game: it starts at full.
     pub vitals: Option<Vitals>,
+    /// Tasks taken from the boards and not finished yet.
+    pub board_tasks: Vec<BoardTask>,
+}
+
+/// A task taken from a base's board. It counts only fish caught at that base.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BoardTask {
+    pub id: i64,
+    pub base: i32,
+    /// The board's tab: 1000 income, 1010 resources, 1020 experience and
+    /// reputation, 1100 daily.
+    pub category: i32,
+    /// The client's task text in QTask.xml: 1 count, 2 count from a weight,
+    /// 4 trophies, 5 total weight from a weight, 6 total weight, 7 total weight
+    /// on a bait.
+    pub task: i32,
+    /// Colour from black 0 to gold 4.
+    pub quality: i32,
+    /// Its name in QTask.xml `qdynamic`.
+    pub title: i32,
+    /// 0 for any fish.
+    pub species: i32,
+    pub bait: i32,
+    /// Fish for counted tasks, grams for weighed ones.
+    pub target: i32,
+    pub min_grams: i32,
+    pub max_grams: i32,
+    pub progress: i32,
+    /// The client's reward line: `money=..;exp=..;repfrac=faction/points;wpn=item/count`.
+    pub reward: String,
+    /// When it has to be done by, Unix seconds; 0 for no limit.
+    pub ends_at: i64,
 }
 
 #[derive(Debug, Clone)]

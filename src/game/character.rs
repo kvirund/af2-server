@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, cards, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
+use super::{Account, Conn, Outcome, Player, Session, board, cards, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -169,6 +169,7 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     perks::send(&session.conn, player).await?;
     skills::send_study(&session.conn, player).await?;
     keepnet::send_all(&session.conn, player).await?;
+    board::enter(&session.conn, player).await?;
     session.conn.send(msg::LOAD_BASE, Vec::new()).await?;
     session.conn.log(&format!("   -> 145, 150, 100, 180, 174, 175, 151 entered as {character_id}"));
     Ok(Outcome::Answered)
