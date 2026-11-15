@@ -56,7 +56,7 @@ pub fn teaches_nothing_new(recipes: &[Recipe], character: &CharacterData, item: 
 }
 
 /// Learning a limited recipe again adds its uses.
-fn add_uses(known: &mut HashMap<i32, i32>, recipe: i32, uses: i32) {
+pub(super) fn add_uses(known: &mut HashMap<i32, i32>, recipe: i32, uses: i32) {
     let total = known.entry(recipe).or_insert(0);
     *total = if uses < 0 || *total < 0 { UNLIMITED } else { *total + uses };
 }

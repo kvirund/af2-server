@@ -74,6 +74,8 @@ pub const CRAFT: i32 = 1700;
 pub const CRAFT_STATION: i32 = 1701;
 pub const RECIPE_LEARN: i32 = 1710;
 pub const CRAFT_MAKE: i32 = 1702;
+/// Case 1704: long item, shown in the "you got" window.
+pub const ITEM_RECEIVED: i32 = 1704;
 pub const USER_STATE: i32 = 1005;
 pub const GATHER_POINTS: i32 = 161;
 pub const GATHER_UPDATE: i32 = 162;

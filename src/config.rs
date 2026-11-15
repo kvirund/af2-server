@@ -392,9 +392,6 @@ pub struct Settings {
     pub board: BoardSettings,
     #[serde(default)]
     pub spas: SpasSettings,
-    /// Item to what it holds or gives when used («Использовать», wtype 30).
-    #[serde(default)]
-    pub packages: BTreeMap<i32, PackageSettings>,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
@@ -416,31 +413,6 @@ pub struct SpasSettings {
     /// Trophies listed one by one; the rest go with "all".
     pub max_listed: usize,
     pub patents: Vec<PatentSettings>,
-}
-
-/// A package: fixed contents, one random item of `one_of` (or, `fish_card_percent`
-/// of the time, a fish card of a species some recipe asks for), or a gift of
-/// the item's first `basePar` number.
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PackageSettings {
-    #[serde(default)]
-    pub items: Vec<[i32; 2]>,
-    #[serde(default)]
-    pub one_of: Vec<i32>,
-    #[serde(default)]
-    pub fish_card_percent: f64,
-    #[serde(default)]
-    pub gives: Option<Gift>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Gift {
-    Vip,
-    Experience,
-    WorkPoints,
-    Premium,
 }
 
 /// A VIP patent in the terminal: the dialog answer, days and ergs.

@@ -94,6 +94,33 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     Ok(Outcome::Answered)
 }
 
+/// Moves the character without asking the client first (trip items). Location
+/// 0 is the base itself: 150 and 151 as from the map's button; any other goes
+/// as an arrival, 158 and 160, at spawn point 0, which the client sends itself.
+pub async fn teleport(conn: &Conn, player: &mut Player, base: i32, location: i32) -> Result<()> {
+    if location != BASE_LOCATION && destination(conn, base, location).is_none() {
+        conn.log(&format!("   trip to base {base} location {location}: unknown destination"));
+        return Ok(());
+    }
+    player.base = base;
+    player.location = location;
+    player.shown_points = None;
+    send_base_details(conn, base).await?;
+    if location == BASE_LOCATION {
+        conn.send(msg::LOAD_BASE, Vec::new()).await?;
+        conn.log(&format!("   -> 150, 151 trip to base {base}"));
+        return Ok(());
+    }
+    let mut w = AfcWriter::new();
+    w.int32(0);
+    conn.send(msg::SPAWN_POINT, w.finish()).await?;
+    let mut w = AfcWriter::new();
+    w.int32(base).int32(location).int32(0).int32(0);
+    conn.send(msg::GO_TO_LOCATION, w.finish()).await?;
+    conn.log(&format!("   -> 150, 158, 160 trip to base {base} location {location}"));
+    Ok(())
+}
+
 /// Client 139: int base, int location, int point, from a zone on the edge of
 /// a location that leads into the next one in the same scene (Мост to Склон).
 /// Case 157 back moves the client there without loading the scene again; it

@@ -10,7 +10,7 @@ use anyhow::Result;
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, board, cards, character, keepnet, inventory, loot, reputation, vip, vitals, perks};
+use super::{Bite, Outcome, Session, active, board, cards, character, effects, keepnet, inventory, loot, reputation, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species, TraitSettings};
 use crate::messages as msg;
@@ -342,7 +342,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     };
 
     let per_level = &conn.world.settings.reputation.per_level;
-    let education = perks::effects(conn, player).experience * reputation::base_bonus(&conn.world.settings, player, per_level.experience_percent);
+    let education = perks::effects(conn, player).experience * effects::education(&player.data) * reputation::base_bonus(&conn.world.settings, player, per_level.experience_percent);
     let fish = CaughtFish {
         id: conn.world.store.next_id().await?,
         species: bite.species,

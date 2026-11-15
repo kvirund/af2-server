@@ -168,7 +168,7 @@ fn levels_of(conn: &Conn, player: &Player) -> BTreeMap<i32, i32> {
 fn list_for(conn: &Conn, player: &Player) -> (Vec<u8>, String) {
     let settings = &conn.world.settings;
     let character = &player.data;
-    let (used, limit) = (skills::used(character), skills::limit(&settings.skills, character.level));
+    let (used, limit) = (skills::used(character), skills::limit(&settings.skills, character));
     let entries = entries(settings, &conn.world.catalog, character);
     let shown: Vec<String> = entries.iter().map(|entry| format!("{}:{}", entry.perk, entry.total)).collect();
     (perk_list(used, limit, &entries), format!("limit {used}/{limit}, {}", shown.join(" ")))

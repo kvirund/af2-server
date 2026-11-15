@@ -34,8 +34,10 @@ pub fn used(character: &CharacterData) -> i32 {
     character.skills.values().map(|skill| skill.level).sum()
 }
 
-pub fn limit(settings: &SkillSettings, level: i32) -> i32 {
-    settings.limit_base + settings.limit_per_level * level
+/// All levels together; implants add to it (`nav_point`).
+pub fn limit(settings: &SkillSettings, character: &CharacterData) -> i32 {
+    let implants = character.quest_values.get(packages::PARAMETER_POINTS).copied().unwrap_or(0);
+    settings.limit_base + settings.limit_per_level * character.level + implants
 }
 
 /// Puts a skill on study, or says why not with the client's own words.
@@ -62,7 +64,7 @@ fn gain(tree: &SkillTree, skills: &SkillSettings, character: &mut CharacterData,
     let perk = character.studying;
     let parent = tree.get(perk).map_or(0, |node| node.parent);
     let root = (parent != 0).then(|| character.skills.get(&parent).map_or(0, |skill| skill.level));
-    let (mut used, limit) = (used(character), limit(skills, character.level));
+    let (mut used, limit) = (used(character), limit(skills, character));
     let max = skills.max_level;
     let Some(skill) = character.skills.get_mut(&perk) else {
         return Vec::new();

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, board, cards, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
+use super::{Account, Conn, Outcome, Player, Session, board, cards, effects, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -165,6 +165,7 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     if vip::active(&player.data) {
         vip::send_icon(&session.conn, &player.data).await?;
     }
+    effects::send_icons(&session.conn, &player.data).await?;
     inventory::send_all(&session.conn, player).await?;
     perks::send(&session.conn, player).await?;
     skills::send_study(&session.conn, player).await?;
