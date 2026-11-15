@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use std::collections::BTreeMap;
 
-use super::{Conn, Outcome, Player, Session, active, fishing, fridge, inventory, perks, travel};
+use super::{Conn, Outcome, Player, Session, active, fishing, fridge, inventory, perks, titles, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{DoctorSettings, ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
@@ -231,6 +231,7 @@ pub async fn use_item(session: &mut Session, message: &AfcMessage) -> Result<Out
         conn.log(&format!("   fridge card used at base {base}"));
         return Ok(Outcome::Answered);
     }
+    let kind = conn.world.catalog.get(template).map_or(0, |item| item.kind);
     let found = conn.world.catalog.get(template).and_then(|item| effect(item.kind, &item.xml));
     let Some(changes) = found else {
         conn.log(&format!("   use: item {template} is not food or medicine"));
@@ -245,6 +246,11 @@ pub async fn use_item(session: &mut Session, message: &AfcMessage) -> Result<Out
         keep_in_range(&settings.vitals, &limits, vitals);
     }
     inventory::remove_one(&mut player.data, id);
+    match kind {
+        FOOD_KIND => titles::count(player, "eat", 1),
+        DRINK_KIND => titles::count(player, "drink", 1),
+        _ => {}
+    }
     conn.save(player).await?;
     send(conn, player).await?;
     conn.log(&format!("   -> 1000 used item {template}"));

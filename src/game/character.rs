@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, board, cards, effects, inventory, keepnet, panels, perks, skills, travel, vip, vitals};
+use super::{Account, Conn, Outcome, Player, Session, board, cards, effects, inventory, keepnet, panels, perks, skills, titles, travel, vip, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -190,7 +190,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int64(character.money).int64(character.premium);
     w.string("");
     w.int32(settings.character.start_base).int32(0); // base, location
-    w.int32(0).int64(0);
+    w.int32(titles::shown(character)).int64(0);
 
     // An int the client reads and never uses, then each scale as float value,
     // int maximum. Writing the maximum first shifted every maximum one scale

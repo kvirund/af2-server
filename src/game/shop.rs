@@ -3,9 +3,10 @@
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, character, crafting, inventory, travel};
+use super::{Conn, Outcome, Player, Session, active, character, chat, crafting, inventory, reputation, travel};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{CatalogItem, ShopSettings};
+use crate::config::{CatalogItem, ReputationSettings, ShopSettings};
+use crate::storage::CharacterData;
 use crate::messages as msg;
 
 const DEFAULT_CATEGORY: i32 = 10;
@@ -21,6 +22,13 @@ fn minimal_level(xml: &str) -> i32 {
 
 fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool {
     !settings.enforce_levels || minimal_level(&item.xml) <= level
+}
+
+/// The faction and level an item is sold from (`reputation` in shops.json),
+/// if the character is not there yet.
+fn reputation_short(shop: &ShopSettings, factions: &ReputationSettings, character: &CharacterData, item: &CatalogItem) -> Option<[i32; 2]> {
+    let [faction, level] = *shop.stock.reputation.get(&item.id)?;
+    (reputation::level_with(factions, character, faction) < level).then_some([faction, level])
 }
 
 /// Priced items this character's base sells.
@@ -92,9 +100,11 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         w.int32(*kind).int32(*count);
     }
     w.int32(listed.len() as i32);
+    let settings = &conn.world.settings;
     for item in &listed {
-        w.int32(item.id).string(&price_text(&conn.world.settings.shop, item));
-        w.double(0.0).double(0.0).double(0.0).boolean(level_allows(&conn.world.settings.shop, level, item));
+        let allowed = level_allows(&settings.shop, level, item) && reputation_short(&settings.shop, &settings.reputation, &player.data, item).is_none();
+        w.int32(item.id).string(&price_text(&settings.shop, item));
+        w.double(0.0).double(0.0).double(0.0).boolean(allowed);
     }
     conn.send(msg::SHOP_LIST, w.finish()).await?;
     conn.log(&format!("   -> 1300 shop {shop}: {} items, {} categories", listed.len(), categories.len()));
@@ -126,6 +136,13 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
     if !level_allows(&world.settings.shop, player.data.level, item) {
         send_status(conn, "none=0").await?;
         conn.log(&format!("   -> 1310 item {template} needs a higher level"));
+        return Ok(Outcome::Answered);
+    }
+    if let Some([faction, level]) = reputation_short(&world.settings.shop, &world.settings.reputation, &player.data, item) {
+        let name = world.settings.reputation.factions.get(&faction).map_or(String::new(), |found| found.name.clone());
+        chat::system(conn, &format!("Нужна репутация «{name}»: {level}-й уровень.")).await?;
+        send_status(conn, "none=0").await?;
+        conn.log(&format!("   -> 1310 item {template} needs level {level} with faction {faction}"));
         return Ok(Outcome::Answered);
     }
 
@@ -200,11 +217,26 @@ mod tests {
     #[test]
     fn a_base_without_a_list_sells_the_fallback() {
         let mut settings = ShopSettings { guide_stock: true, ..Default::default() };
-        settings.stock = ShopStock { fallback_base: 1, bases: [(1, vec![10]), (6, vec![20])].into() };
+        settings.stock = ShopStock { fallback_base: 1, bases: [(1, vec![10]), (6, vec![20])].into(), ..Default::default() };
         assert_eq!(settings.stocked(6), Some(&[20][..]));
         assert_eq!(settings.stocked(9), Some(&[10][..]));
         settings.guide_stock = false;
         assert_eq!(settings.stocked(6), None);
+    }
+
+    #[test]
+    fn some_goods_wait_for_reputation() {
+        use crate::config::FactionSettings;
+        let mut shop = ShopSettings::default();
+        shop.stock.reputation.insert(1402, [1002, 2]);
+        let mut factions = ReputationSettings::default();
+        factions.factions.insert(1002, FactionSettings { start_a: 100, start_b: 0, kf_b: 0.0, levels: 6, name: String::new() });
+        let mut character = CharacterData::default();
+        let rod = CatalogItem { id: 1402, ..item("") };
+        assert_eq!(reputation_short(&shop, &factions, &character, &rod), Some([1002, 2]));
+        character.reputation.insert(1002, 200);
+        assert_eq!(reputation_short(&shop, &factions, &character, &rod), None);
+        assert_eq!(reputation_short(&shop, &factions, &character, &item("")), None);
     }
 
     #[test]

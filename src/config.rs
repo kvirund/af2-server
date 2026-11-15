@@ -308,6 +308,9 @@ pub struct ShopStock {
     /// Bases without a list of their own sell this base's.
     pub fallback_base: i32,
     pub bases: BTreeMap<i32, Vec<i32>>,
+    /// Items sold from a reputation level on: item to [faction, level].
+    #[serde(default)]
+    pub reputation: BTreeMap<i32, [i32; 2]>,
 }
 
 impl ShopSettings {
@@ -452,6 +455,53 @@ pub struct QuestSettings {
     pub deeds: Vec<Deed>,
     #[serde(default)]
     pub tournaments: Vec<Tournament>,
+    #[serde(default)]
+    pub titles: TitleSettings,
+}
+
+/// Titles (the card's titles tab, client `Titul.xml`): which are earned how,
+/// and how often the shown one may change.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleSettings {
+    #[serde(default)]
+    pub change_minutes: i64,
+    #[serde(default)]
+    pub rules: Vec<TitleRule>,
+}
+
+/// A title earned when everything the rule names holds. Titles from deeds,
+/// quests and tournaments come with their reward instead.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TitleRule {
+    pub title: i32,
+    /// Summed quest values `count_<name>`, at least `at`.
+    #[serde(default)]
+    pub counters: Vec<String>,
+    #[serde(default)]
+    pub at: i32,
+    /// Fish of these species ever landed, at least `at`.
+    #[serde(default)]
+    pub species: Vec<i32>,
+    /// Fish of any kind ever landed.
+    #[serde(default)]
+    pub fish: i32,
+    /// The top level with this faction.
+    #[serde(default)]
+    pub faction: i32,
+    /// At least this character level.
+    #[serde(default)]
+    pub level: i32,
+    /// Personal records in at least this many species.
+    #[serde(default)]
+    pub records: i32,
+    /// Every one of these bases visited.
+    #[serde(default)]
+    pub bases: Vec<i32>,
+    /// A VIP patent on.
+    #[serde(default)]
+    pub vip: bool,
 }
 
 /// A periodic tournament at a base: `template` is its name in QTask.xml
@@ -556,6 +606,10 @@ pub struct QuestChain {
     #[serde(default)]
     pub menu: Option<QuestMenu>,
     pub steps: Vec<QuestStep>,
+    /// Texts for pages (`n3`) and answers (`a5`) the dialog file leaves empty:
+    /// the client shows those as "- none -", which case 78 then replaces.
+    #[serde(default)]
+    pub texts: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -678,6 +732,9 @@ pub struct QuestReward {
     /// Quest values set to 1 (what other places check).
     #[serde(default)]
     pub flags: Vec<String>,
+    /// A title (`Titul.xml`).
+    #[serde(default)]
+    pub title: i32,
 }
 
 /// The boat at the lake: fuel it with biofuel, then go to its location for a
@@ -821,6 +878,9 @@ pub struct FactionSettings {
     pub kf_b: f64,
     /// Level names the client has for the faction, the first being level 0.
     pub levels: i32,
+    /// Its name in the client's RepFractions.xml.
+    #[serde(default)]
+    pub name: String,
 }
 
 /// Biofuel handed in at the generator.

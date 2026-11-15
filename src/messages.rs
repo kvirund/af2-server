@@ -56,6 +56,12 @@ pub const REPUTATION_GAINED: i32 = 307;
 pub const CHARACTER_CARD: i32 = 32;
 pub const RECORDS: i32 = 40;
 pub const TITLES: i32 = 101;
+/// Client: int title, the one to show.
+pub const TITLE_CHOOSE: i32 = 102;
+/// int title: the one shown now.
+pub const TITLE_SET: i32 = 108;
+/// int title: a new one earned.
+pub const TITLE_NEW: i32 = 109;
 pub const ACHIEVEMENTS: i32 = 130;
 /// One deed record: a deed has opened.
 pub const DEED_OPENED: i32 = 131;

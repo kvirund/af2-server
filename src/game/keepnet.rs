@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
-use super::{Conn, Outcome, Player, Session, active, inventory, reputation, travel, vip};
+use super::{Conn, Outcome, Player, Session, active, inventory, reputation, titles, travel, vip};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
@@ -81,6 +81,7 @@ pub async fn release(session: &mut Session, message: &AfcMessage) -> Result<Outc
         return Ok(Outcome::Unanswered);
     };
     let fish = player.data.fish.remove(index);
+    titles::count(player, "release", 1);
     conn.save(player).await?;
     conn.log(&format!("   fish {id} released from the keepnet"));
     reputation::fish_released(conn, player, fish.grams).await?;

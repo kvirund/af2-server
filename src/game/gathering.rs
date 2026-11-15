@@ -8,7 +8,7 @@ use rand::random;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::{Conn, Outcome, Player, Session, active, inventory, perks, travel, vitals};
+use super::{Conn, Outcome, Player, Session, active, inventory, perks, titles, travel, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{GatherResource, GatheringSettings};
 use crate::messages as msg;
@@ -241,12 +241,12 @@ pub async fn finish(session: &mut Session, message: &AfcMessage) -> Result<Outco
         let taken = all.get_mut(&base).and_then(|points| points.get_mut(&point)).and_then(|spot| {
             let resource = std::mem::replace(&mut spot.resource, EMPTY);
             spot.respawn_at = now + respawn_delay(&settings.gathering);
-            settings.gathering.resources.get(&resource)
+            settings.gathering.resources.get(&resource).map(|info| (resource, info))
         });
         (taken, stored(&all, base))
     };
     world.store.save_gather_points(base, &kept).await?;
-    let Some(info) = taken else {
+    let Some((resource, info)) = taken else {
         return reply(conn, msg::HARVEST_FINISH, "none=0").await;
     };
     if work_points(player) < info.work_points {
@@ -273,6 +273,7 @@ pub async fn finish(session: &mut Session, message: &AfcMessage) -> Result<Outco
             Err(error) => conn.log(&format!("   gathered {template} x{count} lost: {}", error.status())),
         }
     }
+    titles::count(player, &format!("gather_{resource}"), 1);
     conn.save(player).await?;
     inventory::send_updates(conn, player.data.id, &changed).await?;
     vitals::send(conn, player).await?;

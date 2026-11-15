@@ -14,7 +14,7 @@ use chrono::Utc;
 use super::board::{self, FINISHED, PROGRESS, REMOVE, TAKEN};
 use super::dialog::{COUNT_MARK, close, open, option, replace, text};
 use super::fishing::TROPHY_CLASS;
-use super::{Conn, Outcome, Player, Session, active, character, chat, crafting, inventory, keepnet, reputation, travel};
+use super::{Conn, Outcome, Player, Session, active, character, chat, crafting, inventory, keepnet, reputation, titles, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{QuestChain, QuestPage, QuestReward, QuestSettings, QuestStep, QuestTask, TaskKind};
 use crate::messages as msg;
@@ -293,6 +293,7 @@ pub(super) async fn give(conn: &Conn, player: &mut Player, reward: &QuestReward)
         character::award_experience(conn, player, reward.experience, 1.0).await?;
         said.push(format!("{} опыта", reward.experience));
     }
+    titles::grant(conn, player, reward.title).await?;
     conn.save(player).await?;
     Ok(said)
 }
@@ -324,15 +325,37 @@ async fn settle(conn: &Conn, player: &mut Player) -> Result<()> {
     }
 }
 
-async fn page(conn: &Conn, player: &mut Player, file: i32, page: QuestPage) -> Result<()> {
-    text(conn, file, page.node).await?;
+/// What the client shows for a page or answer its dialog file leaves empty.
+const EMPTY_TEXT: &str = "- none -";
+
+/// Shows page `node`, or the chain's own text for it.
+async fn say(conn: &Conn, chain: &QuestChain, node: i32) -> Result<()> {
+    text(conn, chain.dialog, node).await?;
+    if let Some(own) = chain.texts.get(&format!("n{node}")) {
+        replace(conn, EMPTY_TEXT, own).await?;
+    }
+    Ok(())
+}
+
+/// Adds answer `answer`, or the chain's own text for it. Each own text goes in
+/// before the next empty line arrives, so one replacement hits one line.
+async fn reply(conn: &Conn, chain: &QuestChain, node: i32, answer: i32, param: i64) -> Result<()> {
+    option(conn, chain.dialog, node, answer, param).await?;
+    if let Some(own) = chain.texts.get(&format!("a{answer}")) {
+        replace(conn, EMPTY_TEXT, own).await?;
+    }
+    Ok(())
+}
+
+async fn page(conn: &Conn, player: &mut Player, chain: &QuestChain, page: QuestPage) -> Result<()> {
+    say(conn, chain, page.node).await?;
     if page.answer > 0 {
-        option(conn, file, page.node, page.answer, 0).await?;
+        reply(conn, chain, page.node, page.answer, 0).await?;
     }
     if page.decline > 0 {
-        option(conn, file, page.node, page.decline, 0).await?;
+        reply(conn, chain, page.node, page.decline, 0).await?;
     }
-    open(conn, player, file).await
+    open(conn, player, chain.dialog).await
 }
 
 /// Fish with the trait in the keepnets.
@@ -347,32 +370,32 @@ async fn show_chain(conn: &Conn, player: &mut Player, chain_index: usize) -> Res
     let chain = &settings.chains[chain_index];
     let file = chain.dialog;
     let Some(step) = chain.steps.get(step_of(&player.data, chain)).filter(|step| may_begin(settings, &player.data, step)) else {
-        return page(conn, player, file, chain.idle).await;
+        return page(conn, player, chain, chain.idle).await;
     };
     let taken = value(&player.data, &taken_key(chain)) > 0;
     if !taken {
         return match step.offer {
-            Some(offer) => page(conn, player, file, offer).await,
-            None => page(conn, player, file, chain.idle).await,
+            Some(offer) => page(conn, player, chain, offer).await,
+            None => page(conn, player, chain, chain.idle).await,
         };
     }
     if !tasks_done(&player.data, chain, step) {
-        return page(conn, player, file, step.waiting.unwrap_or(chain.idle)).await;
+        return page(conn, player, chain, step.waiting.unwrap_or(chain.idle)).await;
     }
     let Some(done) = step.done else {
-        return page(conn, player, file, chain.idle).await;
+        return page(conn, player, chain, chain.idle).await;
     };
     if step.deliver_trait > 0 {
-        text(conn, file, done.node).await?;
+        say(conn, chain, done.node).await?;
         for fish in delivered(&player.data, step.deliver_trait) {
-            option(conn, file, done.node, done.answer, fish).await?;
+            reply(conn, chain, done.node, done.answer, fish).await?;
         }
         if done.decline > 0 {
-            option(conn, file, done.node, done.decline, 0).await?;
+            reply(conn, chain, done.node, done.decline, 0).await?;
         }
         return open(conn, player, file).await;
     }
-    page(conn, player, file, done).await
+    page(conn, player, chain, done).await
 }
 
 async fn show_menu(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()> {
@@ -380,14 +403,13 @@ async fn show_menu(conn: &Conn, player: &mut Player, chain_index: usize) -> Resu
     let Some(menu) = chain.menu.as_ref() else {
         return show_chain(conn, player, chain_index).await;
     };
-    let file = chain.dialog;
-    text(conn, file, menu.node).await?;
-    option(conn, file, menu.node, menu.quests, 0).await?;
+    say(conn, chain, menu.node).await?;
+    reply(conn, chain, menu.node, menu.quests, 0).await?;
     if let Some(tokens) = &menu.tokens {
-        option(conn, file, menu.node, tokens.answer, 0).await?;
+        reply(conn, chain, menu.node, tokens.answer, 0).await?;
     }
-    option(conn, file, menu.node, menu.leave, 0).await?;
-    open(conn, player, file).await
+    reply(conn, chain, menu.node, menu.leave, 0).await?;
+    open(conn, player, chain.dialog).await
 }
 
 async fn show_tokens(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()> {
@@ -519,7 +541,7 @@ pub async fn answer(session: &mut Session, message: &AfcMessage) -> Result<Outco
             }
             if !reward_fits(conn, player, &step.reward) {
                 match chain.full {
-                    Some(full) => page(conn, player, file, full).await?,
+                    Some(full) => page(conn, player, chain, full).await?,
                     None => {
                         chat::system(conn, "Награда не помещается в рюкзак.").await?;
                         close(conn, player, file).await?;

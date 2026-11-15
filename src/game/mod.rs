@@ -27,6 +27,7 @@ mod scripts;
 mod shop;
 mod skills;
 mod spas;
+mod titles;
 mod tournaments;
 mod travel;
 mod vip;
@@ -120,6 +121,7 @@ pub struct Player {
     /// VIP skill experience earned online and not handed out yet.
     pub vip_skill_points: f64,
     pub last_vip_tick: Instant,
+    pub last_title_check: Instant,
 }
 
 impl Player {
@@ -140,6 +142,7 @@ impl Player {
             last_active: now,
             vip_skill_points: 0.0,
             last_vip_tick: now,
+            last_title_check: now,
         }
     }
 }
@@ -172,6 +175,7 @@ impl Session {
 pub async fn tick(session: &mut Session) -> Result<()> {
     vitals::tick(session).await?;
     tournaments::tick(session).await?;
+    titles::tick(session).await?;
     vip::tick(session).await
 }
 
@@ -243,6 +247,8 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::STATISTICS => cards::statistics(session).await,
         msg::RECORDS if matches!(message.reader().int32(), Ok(0)) => cards::records(session).await,
         msg::ACHIEVEMENTS if matches!(message.reader().int32(), Ok(0)) => deeds::tab(session).await,
+        msg::TITLES if matches!(message.reader().int32(), Ok(0)) => titles::tab(session).await,
+        msg::TITLE_CHOOSE => titles::choose(session, message).await,
         id @ (msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }

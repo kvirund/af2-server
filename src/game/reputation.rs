@@ -168,7 +168,7 @@ mod tests {
     use crate::config::{ContributionSettings, ReleaseSettings};
 
     fn refuge() -> FactionSettings {
-        FactionSettings { start_a: 300, start_b: 500, kf_b: 2.0, levels: 4 }
+        FactionSettings { start_a: 300, start_b: 500, kf_b: 2.0, levels: 4, name: String::new() }
     }
 
     fn settings() -> ReputationSettings {

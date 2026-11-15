@@ -50,7 +50,7 @@ fn wait_seconds(healed_at: i64, now: i64, cooldown_minutes: i64) -> i64 {
 
 /// What `DateTime.FromBinary` reads for a local time: ticks of 100 ns since
 /// the year 1, with the kind bits left at "unspecified".
-fn dotnet_ticks(time: NaiveDateTime) -> i64 {
+pub(super) fn dotnet_ticks(time: NaiveDateTime) -> i64 {
     let origin = NaiveDate::from_ymd_opt(1, 1, 1).unwrap_or_default().and_hms_opt(0, 0, 0).unwrap_or_default();
     (time - origin).num_seconds() * 10_000_000
 }
