@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use chrono::Local;
 
-use super::{Conn, Outcome, Player, Session, active, character};
+use super::{Conn, Outcome, Player, Session, active, character, quests};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BaseSettings, Settings};
 use crate::messages as msg;
@@ -45,6 +45,11 @@ fn destination<'a>(conn: &'a Conn, base: i32, location: i32) -> Option<&'a BaseS
     conn.world.settings.bases.get(&base).filter(|info| info.locations.contains(&location))
 }
 
+/// A place the map offers: not the boat's location, which only the boat reaches.
+fn on_map(conn: &Conn, base: i32, location: i32) -> Option<&BaseSettings> {
+    destination(conn, base, location).filter(|_| !quests::closed_on_map(&conn.world.settings.quests, base, location))
+}
+
 fn level_allows(conn: &Conn, info: &BaseSettings, player: &Player) -> bool {
     !conn.world.settings.travel.enforce_levels || player.data.level >= info.min_level
 }
@@ -57,8 +62,8 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
     let player = active(&mut session.player)?;
     let conn = &session.conn;
 
-    let Some(info) = destination(conn, base, location) else {
-        conn.log(&format!("   travel to base {base} location {location}: unknown destination"));
+    let Some(info) = on_map(conn, base, location) else {
+        conn.log(&format!("   travel to base {base} location {location}: unknown destination or only by boat"));
         return Ok(Outcome::Unanswered);
     };
     if !level_allows(conn, info, player) {
@@ -193,7 +198,7 @@ pub async fn options(session: &mut Session, message: &AfcMessage) -> Result<Outc
     while r.remaining() >= OPTION_RECORD_LEN {
         let (base, location) = (r.int32()?, r.int32()?);
         r.int32()?;
-        if let Some(info) = destination(conn, base, location) {
+        if let Some(info) = on_map(conn, base, location) {
             w.int32(base).int32(location);
             w.int32(if enforce { info.min_level } else { 0 }).int32(ANY_LEVEL);
             w.double(0.0).double(0.0).double(info.travel_cost as f64);

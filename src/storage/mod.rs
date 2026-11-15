@@ -139,6 +139,8 @@ pub struct BoardTask {
     pub task: i32,
     /// Colour from black 0 to gold 4.
     pub quality: i32,
+    /// What the line is about: 1 (or 0) fish, 4 and 5 an item in `species`.
+    pub kind: i32,
     /// Its name in QTask.xml `qdynamic`.
     pub title: i32,
     /// 0 for any fish.

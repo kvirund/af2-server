@@ -100,7 +100,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     max_grams INTEGER NOT NULL,
     progress INTEGER NOT NULL,
     reward TEXT NOT NULL,
-    ends_at INTEGER NOT NULL
+    ends_at INTEGER NOT NULL,
+    kind INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS quest_values (

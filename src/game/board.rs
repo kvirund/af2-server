@@ -21,13 +21,15 @@ use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use rand::random;
 
 use super::fishing::{LARGE_CLASS, TROPHY_CLASS, experience_for};
-use super::{Conn, Outcome, Player, Session, active, character, chat, inventory, keepnet, reputation, travel};
+use super::{Conn, Outcome, Player, Session, active, character, chat, inventory, keepnet, reputation, tournaments, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BoardSettings, FishTable, Settings, Species};
 use crate::messages as msg;
 use crate::storage::{BoardTask, CaughtFish, CharacterData};
 use crate::world::{BoardOffer, BoardOffers};
 
+/// Categories below this are NPC quests (`quests.rs`), not the board's.
+pub(super) const FIRST_BOARD_CATEGORY: i32 = 1000;
 const INCOME: i32 = 1000;
 const RESOURCES: i32 = 1010;
 const EXPERIENCE: i32 = 1020;
@@ -49,10 +51,10 @@ const DONE: i32 = 1;
 
 /// Commands of case 670.
 const GIVE_UP_TAB: i32 = 1;
-const REMOVE: i32 = 2;
-const TAKEN: i32 = 3;
-const FINISHED: i32 = 4;
-const PROGRESS: i32 = 5;
+pub(super) const REMOVE: i32 = 2;
+pub(super) const TAKEN: i32 = 3;
+pub(super) const FINISHED: i32 = 4;
+pub(super) const PROGRESS: i32 = 5;
 
 /// Names in QTask.xml `qdynamic`.
 const TITLE_CONTROL: i32 = 1;
@@ -216,6 +218,7 @@ fn make_offer(settings: &Settings, fish: &FishTable, base: i32, category: i32, e
     Some(BoardOffer {
         id: 0,
         task: BoardTask {
+            kind: FISH,
             id: 0,
             base,
             category,
@@ -273,9 +276,10 @@ fn write_offer(w: &mut AfcWriter, offer: &BoardOffer, ends_at: i64) {
 }
 
 /// Task record of cases 675 and 680.
-fn write_task(w: &mut AfcWriter, task: &BoardTask) {
+pub(super) fn write_task(w: &mut AfcWriter, task: &BoardTask) {
     let status = if task.progress >= task.target { DONE } else { GOING };
-    w.int64(task.id).int32(FISH).int32(task.category).int32(task.task).int32(status);
+    let kind = if task.kind == 0 { FISH } else { task.kind };
+    w.int64(task.id).int32(kind).int32(task.category).int32(task.task).int32(status);
     w.int32(task.species).int32(task.bait).int32(task.target).int32(task.min_grams).int32(task.max_grams);
     w.int32(task.base).int32(0).int32(task.progress);
     w.boolean(task.ends_at > 0);
@@ -283,7 +287,7 @@ fn write_task(w: &mut AfcWriter, task: &BoardTask) {
     w.string(&task.reward);
 }
 
-async fn send_tasks(conn: &Conn, id: i32, tasks: &[&BoardTask]) -> Result<()> {
+pub(super) async fn send_tasks(conn: &Conn, id: i32, tasks: &[&BoardTask]) -> Result<()> {
     let mut w = AfcWriter::new();
     for task in tasks {
         write_task(&mut w, task);
@@ -291,7 +295,7 @@ async fn send_tasks(conn: &Conn, id: i32, tasks: &[&BoardTask]) -> Result<()> {
     conn.send(id, w.finish()).await
 }
 
-async fn send_events(conn: &Conn, events: &[(i32, i64)]) -> Result<()> {
+pub(super) async fn send_events(conn: &Conn, events: &[(i32, i64)]) -> Result<()> {
     if events.is_empty() {
         return Ok(());
     }
@@ -342,9 +346,7 @@ pub async fn open(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let player = active(&mut session.player)?;
     let conn = &session.conn;
     if category == TOURNAMENTS {
-        conn.send(msg::TOURNAMENTS, Vec::new()).await?;
-        conn.log("   -> 705 no tournaments");
-        return Ok(Outcome::Answered);
+        return tournaments::tab(conn, player).await;
     }
     drop_expired(conn, player).await?;
     let settings = &conn.world.settings;
@@ -450,6 +452,12 @@ pub async fn refuse(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let category = message.reader().int32()?;
     let player = active(&mut session.player)?;
     let conn = &session.conn;
+    if category < FIRST_BOARD_CATEGORY {
+        // NPC quests are not given up; the list comes again whole.
+        send_tasks(conn, msg::TASKS, &player.data.board_tasks.iter().collect::<Vec<_>>()).await?;
+        conn.log(&format!("   -> 675 quest category {category} is not given up"));
+        return Ok(Outcome::Answered);
+    }
     let before = player.data.board_tasks.len();
     player.data.board_tasks.retain(|task| task.category != category);
     conn.save(player).await?;
@@ -479,7 +487,7 @@ pub async fn fish_kept(conn: &Conn, player: &mut Player, fish: &CaughtFish) -> R
     let base = travel::current_base(&conn.world.settings, player);
     let mut changed = Vec::new();
     let mut take_fish = false;
-    for task in player.data.board_tasks.iter_mut().filter(|task| task.base == base && task.progress < task.target) {
+    for task in player.data.board_tasks.iter_mut().filter(|task| task.category >= FIRST_BOARD_CATEGORY && task.base == base && task.progress < task.target) {
         let added = counts_for(task, fish);
         if added > 0 {
             task.progress = (task.progress + added).min(task.target);

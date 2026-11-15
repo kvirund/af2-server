@@ -392,6 +392,9 @@ pub struct Settings {
     pub board: BoardSettings,
     #[serde(default)]
     pub spas: SpasSettings,
+    /// From `config/quests.json`: the NPCs' quest chains.
+    #[serde(skip)]
+    pub quests: QuestSettings,
     /// From `data/skills.json`, which af2-launcher makes from the game.
     #[serde(skip)]
     pub skill_tree: SkillTree,
@@ -413,6 +416,283 @@ pub struct SpasSettings {
     /// Trophies listed one by one; the rest go with "all".
     pub max_listed: usize,
     pub patents: Vec<PatentSettings>,
+    /// A record fish (the heaviest of its species the character has) for
+    /// Record Holder's tokens.
+    #[serde(default)]
+    pub record_token: i32,
+    #[serde(default)]
+    pub record_tokens: i32,
+    /// A fish with traits for Explorer's tokens, once the quest value
+    /// `unique_flag` is set (Лиза's quest).
+    #[serde(default)]
+    pub unique_token: i32,
+    #[serde(default)]
+    pub unique_tokens: i32,
+    #[serde(default)]
+    pub unique_flag: String,
+    /// The free «Сброс параметров» course, once, from this level.
+    #[serde(default)]
+    pub reset_course: i32,
+    #[serde(default)]
+    pub reset_level: i32,
+}
+
+/// `config/quests.json`: which NPC talks with which dialog file, and the quest
+/// chains told in those files.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestSettings {
+    #[serde(default)]
+    pub npcs: Vec<QuestNpc>,
+    #[serde(default)]
+    pub chains: Vec<QuestChain>,
+    #[serde(default)]
+    pub boat: Option<BoatSettings>,
+    #[serde(default)]
+    pub deeds: Vec<Deed>,
+    #[serde(default)]
+    pub tournaments: Vec<Tournament>,
+}
+
+/// A periodic tournament at a base: `template` is its name in QTask.xml
+/// `tnames`, `task` its line in category 3000.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tournament {
+    pub template: i32,
+    pub base: i32,
+    pub task: i32,
+    /// 0 for any fish.
+    #[serde(default)]
+    pub species: i32,
+    #[serde(default)]
+    pub bait: i32,
+    #[serde(default)]
+    pub min_grams: i32,
+    #[serde(default)]
+    pub max_grams: i32,
+    /// Minutes from one start to the next, and the first start's minute.
+    pub every: i64,
+    #[serde(default)]
+    pub offset: i64,
+    /// How long one runs.
+    pub minutes: i64,
+    /// Character levels that take part; [0, 0] for any.
+    #[serde(default)]
+    pub levels: [i32; 2],
+    /// Scores for the 1st, 2nd and 3rd place.
+    pub places: [i32; 3],
+    /// For the 1st, 2nd, 3rd place and for taking part.
+    #[serde(default)]
+    pub prizes: Vec<QuestReward>,
+}
+
+/// A deed (Деяния, the card's achievements tab): so many fish of a kind over
+/// the whole game. `id` is its name in QTask.xml `achivments_name`, `task` its
+/// line in category 2000.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Deed {
+    pub id: i32,
+    pub task: i32,
+    pub count: i32,
+    /// Any of these species; empty for any fish.
+    #[serde(default)]
+    pub species: Vec<i32>,
+    #[serde(default)]
+    pub min_grams: i32,
+    #[serde(default)]
+    pub max_grams: i32,
+    #[serde(default)]
+    pub trophy: bool,
+    /// 1 float, 2 feeder, 3 spinning.
+    #[serde(default)]
+    pub rod_kind: i32,
+    /// Only fish with traits.
+    #[serde(default)]
+    pub unique: bool,
+    /// Deeds to finish first.
+    #[serde(default)]
+    pub requires: Vec<i32>,
+    /// Shown once one of these species has been caught.
+    #[serde(default)]
+    pub opens_on: Vec<i32>,
+    #[serde(default)]
+    pub reward: QuestReward,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestNpc {
+    pub base: i32,
+    pub npc: i32,
+    pub dialog: i32,
+}
+
+/// A text of the dialog file with the answer under it, and maybe a second
+/// answer that closes the window.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestPage {
+    pub node: i32,
+    pub answer: i32,
+    #[serde(default)]
+    pub decline: i32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestChain {
+    pub name: String,
+    pub dialog: i32,
+    /// The client's task category (`<cat>` in QTask.xml) the tasks show under.
+    pub category: i32,
+    /// Shown when nothing is due.
+    pub idle: QuestPage,
+    /// Shown when a reward does not fit.
+    #[serde(default)]
+    pub full: Option<QuestPage>,
+    /// A menu first (node, the answer that leads to the quests, the one that leaves).
+    #[serde(default)]
+    pub menu: Option<QuestMenu>,
+    pub steps: Vec<QuestStep>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestMenu {
+    pub node: i32,
+    pub quests: i32,
+    pub leave: i32,
+    #[serde(default)]
+    pub tokens: Option<TokenExchange>,
+}
+
+/// Tokens for reputation at an NPC: one or all of them.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenExchange {
+    pub answer: i32,
+    pub node: i32,
+    pub one: i32,
+    pub all: i32,
+    pub item: i32,
+    pub faction: i32,
+    pub points: i64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestStep {
+    /// What the NPC asks; its answer takes the tasks. Without it the tasks
+    /// come as soon as the step before is rewarded.
+    #[serde(default)]
+    pub offer: Option<QuestPage>,
+    #[serde(default)]
+    pub tasks: Vec<QuestTask>,
+    #[serde(default)]
+    pub waiting: Option<QuestPage>,
+    /// When the tasks are done: its answer gives the reward. Without it the
+    /// reward comes at once.
+    #[serde(default)]
+    pub done: Option<QuestPage>,
+    /// The done page lists fish with this trait; the answer takes one.
+    #[serde(default)]
+    pub deliver_trait: i32,
+    /// Another chain that has to be finished first.
+    #[serde(default)]
+    pub requires: Option<String>,
+    #[serde(default)]
+    pub reward: QuestReward,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskKind {
+    #[default]
+    Catch,
+    Make,
+    Have,
+    Talk,
+    Pour,
+}
+
+/// One line in the client's task list. Fish tasks count fish put in the
+/// keepnet; `weighed` ones count grams.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestTask {
+    pub task: i32,
+    /// When the line belongs to another NPC's category ("Поговорить с ...").
+    #[serde(default)]
+    pub category: i32,
+    #[serde(default)]
+    pub kind: TaskKind,
+    #[serde(default)]
+    pub count: i32,
+    #[serde(default)]
+    pub species: i32,
+    #[serde(default)]
+    pub bait: i32,
+    #[serde(default)]
+    pub min_grams: i32,
+    #[serde(default)]
+    pub max_grams: i32,
+    #[serde(default)]
+    pub base: i32,
+    #[serde(default)]
+    pub location: i32,
+    #[serde(default)]
+    pub trophy: bool,
+    #[serde(default)]
+    pub weighed: bool,
+    /// 1 float, 2 feeder, 3 spinning.
+    #[serde(default)]
+    pub rod_kind: i32,
+    /// For make and have.
+    #[serde(default)]
+    pub item: i32,
+    /// For talk: the dialog of the NPC to talk to.
+    #[serde(default)]
+    pub dialog: i32,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestReward {
+    #[serde(default)]
+    pub items: Vec<[i32; 2]>,
+    /// Recipes learned for good.
+    #[serde(default)]
+    pub recipes: Vec<i32>,
+    #[serde(default)]
+    pub reputation: Vec<[i64; 2]>,
+    #[serde(default)]
+    pub experience: i32,
+    /// Kopecks.
+    #[serde(default)]
+    pub money: i64,
+    /// Ergs.
+    #[serde(default)]
+    pub premium: i64,
+    /// Quest values set to 1 (what other places check).
+    #[serde(default)]
+    pub flags: Vec<String>,
+}
+
+/// The boat at the lake: fuel it with biofuel, then go to its location for a
+/// token.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoatSettings {
+    pub base: i32,
+    pub npc: i32,
+    pub dialog: i32,
+    pub location: i32,
+    pub fuel_item: i32,
+    pub fuel_percent: i32,
+    pub token: i32,
+    pub trip_percent: i32,
 }
 
 /// A VIP patent in the terminal: the dialog answer, days and ergs.
@@ -816,6 +1096,10 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
     let mut settings: Settings = read_commented_with_local(&config_dir.join("settings.json"))?;
     if settings.shop.guide_stock {
         settings.shop.stock = read_commented(&config_dir.join("shops.json"))?;
+    }
+    let quests = config_dir.join("quests.json");
+    if quests.exists() {
+        settings.quests = read_commented(&quests)?;
     }
     let gathering = config_dir.join("gathering.json");
     if gathering.exists() {

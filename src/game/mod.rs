@@ -6,6 +6,7 @@ mod cards;
 mod chat;
 mod character;
 mod crafting;
+mod deeds;
 mod dialog;
 mod doctor;
 mod effects;
@@ -19,12 +20,14 @@ mod keepnet;
 mod packages;
 mod panels;
 mod perks;
+mod quests;
 mod refining;
 mod reputation;
 mod scripts;
 mod shop;
 mod skills;
 mod spas;
+mod tournaments;
 mod travel;
 mod vip;
 mod vitals;
@@ -107,6 +110,8 @@ pub struct Player {
     /// The base and point whose gathering bar is running.
     pub harvesting: Option<(i32, i32)>,
     pub landed: HashMap<i64, CaughtFish>,
+    /// The kind of rod each landed fish came on, for quest tasks.
+    pub rod_kinds: HashMap<i64, i32>,
     /// The dialog file whose window is open; the client's answers do not say.
     pub dialog: Option<i32>,
     pub last_tick: Instant,
@@ -128,6 +133,7 @@ impl Player {
             shown_points: None,
             harvesting: None,
             landed: HashMap::new(),
+            rod_kinds: HashMap::new(),
             dialog: None,
             last_tick: now,
             last_save: now,
@@ -165,6 +171,7 @@ impl Session {
 /// Time passing for the character, if enough of it has.
 pub async fn tick(session: &mut Session) -> Result<()> {
     vitals::tick(session).await?;
+    tournaments::tick(session).await?;
     vip::tick(session).await
 }
 
@@ -220,17 +227,22 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
                 Some(outcome) => Ok(outcome),
                 None => match spas::talk(session, message).await? {
                     Some(outcome) => Ok(outcome),
-                    None => keepnet::open_market(session, message).await,
+                    None => match quests::talk(session, message).await? {
+                        Some(outcome) => Ok(outcome),
+                        None => keepnet::open_market(session, message).await,
+                    },
                 },
             },
         },
         msg::DIALOG_ANSWER if generator::is_open(session) => generator::answer(session, message).await,
         msg::DIALOG_ANSWER if spas::is_open(session) => spas::answer(session, message).await,
+        msg::DIALOG_ANSWER if quests::is_open(session) => quests::answer(session, message).await,
         msg::DIALOG_ANSWER => doctor::answer(session, message).await,
         msg::REPUTATION => reputation::tab(session).await,
         msg::CHARACTER_CARD => panels::card(session, message).await,
         msg::STATISTICS => cards::statistics(session).await,
         msg::RECORDS if matches!(message.reader().int32(), Ok(0)) => cards::records(session).await,
+        msg::ACHIEVEMENTS if matches!(message.reader().int32(), Ok(0)) => deeds::tab(session).await,
         id @ (msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }

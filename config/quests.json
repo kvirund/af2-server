@@ -1,0 +1,324 @@
+// Задания NPC. Тексты — диалоги клиента (Localization/Russian/Quests/N.lng), строки списка
+// заданий — QTask.xml (<cat> 1-6). Что просить и что давать, взято из самих текстов там, где они
+// это говорят; где не говорят, придумано (помечено «придумано»).
+//
+// npcs: какой NPC какой базы говорит каким диалогом. Номера NPC — addId объектов сцен; Василич
+// (1), Жека (4) — Убежище; Лиза (1), Игнат (4) — Пустошь; Паша (4) и Сашка с катером (3) — Озеро
+// Кулгу; Кардан (3) — Карасиный пруд. Кто из них кто на Озере и пруду — по моделям NPC_Pasha и
+// NPC_Sasha в сценах и по строкам заданий («Поговорить с Пашей»): догадка.
+//
+// Цепочка: name (квестовое значение quest_<name> — пройдено шагов), dialog, category (раздел списка
+// заданий), idle — что NPC говорит, когда делать нечего, full — когда награда не помещается.
+// Шаг: offer — вопрос и ответ «взять» (без него задания приходят сразу после прошлого шага),
+// tasks — строки списка, waiting — пока не сделано, done — сделано, ответ даёт награду (без него
+// награда сразу), requires — какая цепочка должна быть пройдена до шага («имя») или сколько её
+// шагов («имя:N»), reward.
+// Задание: task — номер строки в разделе, kind catch (рыба в садок «в садок»), make (создать на
+// станке), have (иметь с собой), talk (поговорить с NPC диалога dialog), pour (влить биотопливо в
+// генератор); count, species, bait, minGrams, maxGrams, base, location, trophy, weighed (граммы),
+// rodKind (3 — спиннинг), item.
+// Награда: items [предмет, штук], recipes (навсегда), reputation [фракция, очки], experience,
+// money (копейки), flags (квестовые значения, которые ставятся в 1).
+{
+  "npcs": [
+    { "base": 1, "npc": 1, "dialog": 1 },
+    { "base": 1, "npc": 4, "dialog": 4 },
+    { "base": 3, "npc": 1, "dialog": 10 },
+    { "base": 3, "npc": 4, "dialog": 8 },
+    { "base": 4, "npc": 4, "dialog": 12 },
+    { "base": 6, "npc": 3, "dialog": 13 }
+  ],
+
+  // Катер «Сметливый» (11.lng): Сашка на Озере Кулгу возит на локацию 44 за жетон кладовщика
+  // (1336) и биотопливо (гайд 1102257736). Сколько процентов топлива даёт биотопливо — придумано,
+  // -10% за поездку — из диалога. Карта на эту локацию не пускает.
+  "boat": { "base": 4, "npc": 3, "dialog": 11, "location": 44, "fuelItem": 1170, "fuelPercent": 20, "token": 1336, "tripPercent": 10 },
+
+  "chains": [
+    {
+      // Василич: 1.lng, раздел 1 «Развитие». Задания по текстам и строкам QTask; сколько рыбы —
+      // придумано. Экзамен: «выловить указанные виды» — какие, не сказано: трофеи окуня, плотвы
+      // и карася Убежища (придумано). Награда экзамена — учебник «Снасти А» (из текста).
+      "name": "vasil", "dialog": 1, "category": 1,
+      "idle": { "node": 8, "answer": 9 },
+      "full": { "node": 14, "answer": 30 },
+      "steps": [
+        {
+          "offer": { "node": 6, "answer": 8 },
+          "tasks": [ { "task": 0, "count": 10, "bait": 1018, "location": 4 } ],
+          "waiting": { "node": 8, "answer": 9 },
+          "done": { "node": 9, "answer": 19 },
+          "reward": { "experience": 100 }
+        },
+        {
+          "offer": { "node": 11, "answer": 18 },
+          "tasks": [ { "task": 2, "count": 10, "minGrams": 100, "maxGrams": 3000 } ],
+          "waiting": { "node": 8, "answer": 9 },
+          "done": { "node": 13, "answer": 20 },
+          "reward": { "experience": 100 }
+        },
+        {
+          "tasks": [ { "task": 4, "kind": "make", "item": 1167, "count": 2 } ],
+          "waiting": { "node": 8, "answer": 9 },
+          // «Держи рецепт биотоплива»
+          "done": { "node": 16, "answer": 21 },
+          "reward": { "items": [[1173, 1]] }
+        },
+        {
+          "tasks": [
+            { "task": 6, "kind": "make", "item": 1170, "count": 1 },
+            { "task": 7, "kind": "pour", "count": 1 }
+          ],
+          "waiting": { "node": 8, "answer": 9 },
+          "done": { "node": 18, "answer": 22 },
+          "reward": { "experience": 200 }
+        },
+        // «Поговорить с Жекой» в его разделе; дальше Василич ждёт, пока Жека не закончит.
+        { "tasks": [ { "task": 1, "category": 2, "kind": "talk", "dialog": 4 } ] },
+        {
+          "requires": "zheka",
+          "offer": { "node": 20, "answer": 31, "decline": 32 },
+          "tasks": [
+            { "task": 11, "species": 66, "trophy": true, "base": 1 },
+            { "task": 12, "species": 77, "trophy": true, "base": 1 },
+            { "task": 13, "species": 37, "trophy": true, "base": 1 }
+          ],
+          "waiting": { "node": 8, "answer": 9 },
+          "done": { "node": 22, "answer": 33 },
+          "reward": { "items": [[1274, 1]], "experience": 500 }
+        },
+        // «Привет Искателю от Василича. Пустоши»
+        { "tasks": [ { "task": 15, "kind": "talk", "dialog": 8 } ] }
+      ]
+    },
+    {
+      // Жека-Жеклёр: 4.lng, раздел 2 «Профессия». Раки за кору (10 из текста), поплавок
+      // (рецепты 501 краска из илистого дракона и 502 поплавок; драконов 15 — столько просит
+      // рецепт краски), детали удочки и катушки (рецепты есть у всех; собрать саму удочку и
+      // катушку нельзя: конструктора на сервере нет), «получить детали 1 шт» (из текста),
+      // рецепты ремкомплектов (503, 504) и учебник «Ремесло» (из текста).
+      "name": "zheka", "dialog": 4, "category": 2,
+      "idle": { "node": 1, "answer": 1 },
+      "full": { "node": 3, "answer": 3 },
+      "steps": [
+        {
+          "requires": "vasil:4",
+          "offer": { "node": 2, "answer": 2 },
+          "tasks": [ { "task": 2, "species": 84, "count": 10 } ],
+          "done": { "node": 5, "answer": 4 },
+          "reward": { "items": [[1161, 1]] }
+        },
+        {
+          // «Стой! Погоди!» с баночкой синих червей — сразу с чертежами.
+          "offer": { "node": 6, "answer": 5 },
+          "tasks": [
+            { "task": 4, "species": 131, "count": 15 },
+            { "task": 5, "kind": "make", "item": 1160, "count": 1 }
+          ],
+          "done": { "node": 9, "answer": 7 },
+          "reward": { "recipes": [501, 502], "items": [[1163, 20]] }
+        },
+        {
+          "offer": { "node": 13, "answer": 8 },
+          "tasks": [
+            { "task": 8, "kind": "make", "item": 1153, "count": 1 },
+            { "task": 9, "kind": "make", "item": 1154, "count": 1 },
+            { "task": 10, "kind": "make", "item": 1155, "count": 1 }
+          ],
+          "done": { "node": 18, "answer": 10 },
+          "reward": { "items": [[1153, 1]] }
+        },
+        {
+          "tasks": [
+            { "task": 14, "kind": "make", "item": 1156, "count": 1 },
+            { "task": 17, "kind": "make", "item": 1219, "count": 1 },
+            { "task": 18, "kind": "make", "item": 1220, "count": 1 }
+          ],
+          "done": { "node": 23, "answer": 20 }
+        },
+        {
+          "tasks": [ { "task": 13, "kind": "have", "item": 1230, "count": 1 } ],
+          "waiting": { "node": 24, "answer": 9 },
+          "done": { "node": 25, "answer": 21 },
+          "reward": { "recipes": [503, 504], "items": [[1276, 1]] }
+        },
+        { "tasks": [ { "task": 10, "category": 1, "kind": "talk", "dialog": 1 } ] }
+      ]
+    },
+    {
+      // Игнат Искатель: 8.lng. Учебник атлетики ученику Василича (из текста).
+      "name": "ignat", "dialog": 8, "category": 3,
+      "idle": { "node": 1, "answer": 1 },
+      "steps": [
+        { "requires": "vasil", "done": { "node": 2, "answer": 2 }, "reward": { "items": [[1275, 1]] } }
+      ]
+    },
+    {
+      // Лиза: 10.lng, раздел 4 «Союз Поплавочников». Задания и награды — из текстов: 4 трофейных
+      // чёрных рака — учебник «Снасти Б» и 510 репутации; обмен уникальной рыбы на жетоны
+      // исследователя в терминале; 5 рыб от 10 кг — «комплект снастей класса Б» (какой предмет —
+      // догадка: рецепты снасти Б) и 510 репутации. Жетон исследователя — 100 репутации (из текста).
+      "name": "lisa", "dialog": 10, "category": 4,
+      "idle": { "node": 4, "answer": 3 },
+      "menu": {
+        "node": 1, "quests": 2, "leave": 3,
+        "tokens": { "answer": 7, "node": 9, "one": 9, "all": 10, "item": 1180, "faction": 1003, "points": 100 }
+      },
+      "steps": [
+        {
+          "offer": { "node": 2, "answer": 4 },
+          "tasks": [ { "task": 1, "species": 122, "trophy": true, "count": 4 } ],
+          "waiting": { "node": 3, "answer": 5 },
+          "done": { "node": 5, "answer": 11 },
+          "reward": { "items": [[1277, 1]], "reputation": [[1003, 510]] }
+        },
+        { "done": { "node": 6, "answer": 12 }, "reward": { "flags": ["spas_unique"] } },
+        {
+          "offer": { "node": 7, "answer": 4 },
+          "tasks": [ { "task": 3, "minGrams": 10000, "count": 5 } ],
+          "waiting": { "node": 3, "answer": 5 },
+          "done": { "node": 8, "answer": 11 },
+          "reward": { "items": [[1381, 1]], "reputation": [[1003, 510]] }
+        }
+      ]
+    },
+    {
+      // Паша (12.lng, «Ги спин»), раздел 5 «Союз Спиннингистов». Всё — из текстов: по 15 берша,
+      // корюшки, лосося балтийского и озёрного, сига на спиннинг — «Райва» и 500 репутации;
+      // по 5 трофейных сига, красноперки, форели озёрной, щуки травянки — «Норд» и 500; рыба с
+      // красной икрой — «Щука-Т1», 1000 и потом ЩукаЛайн-I с ЩукаРолл-I; трофеи на заданные
+      // блёсны — рецепты спиннинга Т2 и Т3 (1411) и 500.
+      "name": "spin", "dialog": 12, "category": 5,
+      "idle": { "node": 18, "answer": 12 },
+      "steps": [
+        { "done": { "node": 1, "answer": 1 } },
+        { "done": { "node": 2, "answer": 2 } },
+        { "done": { "node": 3, "answer": 3 } },
+        {
+          "offer": { "node": 4, "answer": 4 },
+          "tasks": [
+            { "task": 1, "species": 8, "count": 15, "rodKind": 3 },
+            { "task": 2, "species": 46, "count": 15, "rodKind": 3 },
+            { "task": 3, "species": 486, "count": 15, "rodKind": 3 },
+            { "task": 4, "species": 59, "count": 15, "rodKind": 3 },
+            { "task": 5, "species": 95, "count": 15, "rodKind": 3 }
+          ],
+          "waiting": { "node": 5, "answer": 12 },
+          "done": { "node": 6, "answer": 13 },
+          "reward": { "items": [[1400, 1]], "reputation": [[1002, 500]] }
+        },
+        { "done": { "node": 7, "answer": 5 } },
+        { "done": { "node": 8, "answer": 6 } },
+        {
+          "offer": { "node": 9, "answer": 7 },
+          "tasks": [
+            { "task": 7, "species": 95, "trophy": true, "count": 5, "rodKind": 3 },
+            { "task": 8, "species": 47, "trophy": true, "count": 5, "rodKind": 3 },
+            { "task": 9, "species": 65, "trophy": true, "count": 5, "rodKind": 3 },
+            { "task": 10, "species": 128, "trophy": true, "count": 5, "rodKind": 3 }
+          ],
+          "waiting": { "node": 11, "answer": 14 },
+          "done": { "node": 12, "answer": 9 },
+          "reward": { "items": [[1401, 1]], "reputation": [[1002, 500]] }
+        },
+        { "done": { "node": 13, "answer": 10 } },
+        {
+          "offer": { "node": 14, "answer": 11 },
+          "tasks": [ { "task": 13, "kind": "talk", "dialog": 12 } ],
+          "done": { "node": 17, "answer": 15, "decline": 16 },
+          "deliverTrait": 108,
+          "reward": { "items": [[1402, 1]], "reputation": [[1002, 1000]] }
+        },
+        { "done": { "node": 19, "answer": 18 }, "reward": { "items": [[1416, 1], [1419, 1]] } },
+        { "done": { "node": 20, "answer": 19 } },
+        { "done": { "node": 21, "answer": 20 } },
+        {
+          "offer": { "node": 22, "answer": 21 },
+          "tasks": [
+            { "task": 14, "species": 19, "trophy": true, "bait": 1103, "count": 10 },
+            { "task": 15, "species": 129, "trophy": true, "bait": 1097, "count": 10 },
+            { "task": 16, "species": 135, "trophy": true, "bait": 1098, "count": 10 },
+            { "task": 17, "species": 108, "trophy": true, "bait": 1105, "count": 5 },
+            { "task": 18, "species": 33, "trophy": true, "bait": 1095, "count": 1 }
+          ],
+          "waiting": { "node": 25, "answer": 22 },
+          "done": { "node": 24, "answer": 23 },
+          "reward": { "items": [[1411, 1]], "reputation": [[1002, 500]] }
+        }
+      ]
+    },
+    {
+      // Кардан: 13.lng, раздел 6 «Открытие профиля»: 50 кг щуки, 50 кг голавля, 100 кг карася
+      // (из текста). Награда — «дополнительный профиль на все снасти»: такого на сервере нет,
+      // поэтому только опыт (придумано).
+      "name": "kardan", "dialog": 13, "category": 6,
+      "idle": { "node": 3, "answer": 4 },
+      "steps": [
+        { "done": { "node": 1, "answer": 1 } },
+        {
+          "offer": { "node": 2, "answer": 2 },
+          "tasks": [
+            { "task": 1, "species": 128, "weighed": true, "count": 50000 },
+            { "task": 2, "species": 19, "weighed": true, "count": 50000 },
+            { "task": 3, "species": 37, "weighed": true, "count": 100000 }
+          ],
+          "waiting": { "node": 4, "answer": 3 },
+          "done": { "node": 6, "answer": 5 },
+          "reward": { "experience": 3000 }
+        }
+      ]
+    }
+  ],
+  // Деяния (вкладка «Достижения» карточки). Список, условия и награды — гайд 1102257736, номера
+  // имён — QTask.xml <achivments_name>, строки — <cat id="2000">. Титулов на сервере нет, поэтому
+  // титулы из наград не выдаются. Новогодние (7, 11, 17, 22, 23) — для базы «Плато великанов»,
+  // которой нет; «Верховодка» (21) — нет строки задания; «Гринпис» — скрытое, без строки.
+  // «Водное золото» открывается поимкой золотого карася (гайд 844577800); «Любитель мелочи» →
+  // «Уклеечник» → «Голавли» идут по очереди, «Царёв рыбарь II» — после «Царёва рыбаря» и
+  // «Исследователя глубин» (гайд). Осетровые — осётр и стерлядь, раки — узкопалый, широкопалый и
+  // чёрный, голец арктический — голец (видов с такими именами в игре нет).
+  "deeds": [
+    { "id": 1, "task": 1, "count": 1000, "reward": { "premium": 5 } },
+    { "id": 2, "task": 4, "count": 1000, "maxGrams": 100, "reward": { "experience": 300 } },
+    { "id": 19, "task": 1, "count": 100, "species": [112], "requires": [2], "reward": { "items": [[1466, 3]] } },
+    { "id": 20, "task": 1, "count": 100, "species": [19], "requires": [19], "reward": { "items": [[1467, 5]] } },
+    { "id": 3, "task": 1, "count": 300, "species": [38], "opensOn": [38], "reward": { "items": [[1061, 1]] } },
+    { "id": 8, "task": 9, "count": 600, "species": [72, 132, 53], "reward": { "items": [[1240, 1]] } },
+    { "id": 9, "task": 10, "count": 600, "species": [84, 492, 122], "reward": { "items": [[1250, 1]] } },
+    { "id": 6, "task": 1, "count": 200, "species": [97], "reward": { "items": [[1231, 1]] } },
+    { "id": 10, "task": 3, "count": 5, "minGrams": 100, "maxGrams": 100, "reward": { "items": [[1264, 2]] } },
+    { "id": 14, "task": 14, "count": 1000, "unique": true, "maxGrams": 20000, "reward": { "items": [[1244, 50]], "experience": 5000 } },
+    { "id": 5, "task": 1, "count": 200, "species": [128], "reward": { "items": [[1181, 1]] } },
+    { "id": 4, "task": 3, "count": 10, "minGrams": 999, "maxGrams": 1001, "reward": { "items": [[1015, 1]] } },
+    { "id": 12, "task": 12, "count": 1000, "minGrams": 25001, "reward": { "items": [[1362, 3]], "reputation": [[7, 1000]] } },
+    { "id": 15, "task": 15, "count": 200, "species": [69, 103], "reward": { "items": [[1242, 1]], "experience": 20000 } },
+    { "id": 13, "task": 13, "count": 500, "species": [74, 20, 95], "reward": { "items": [[1336, 10]], "reputation": [[4, 1000]] } },
+    { "id": 18, "task": 15, "count": 500, "species": [69, 103], "requires": [15, 13], "reward": { "items": [[1429, 1]] } },
+    { "id": 16, "task": 16, "count": 2000, "trophy": true, "rodKind": 3, "reward": { "items": [[1237, 15]], "experience": 10000 } }
+  ],
+  // Турниры (вкладка «Турниры» доски). Из анонсов в Steam: регистрации нет — участвует каждый, кто
+  // поймал целевую рыбу на базе, пока турнир идёт; на Убежище раз в час, на Пруду и в Пустоши раз
+  // в два часа, на угря раз в 4 часа; «Волжский» и «Форельный» — на разницу веса; Озеро Кулгу и
+  // Разливы — свои турниры. Имена — QTask.xml <tnames>, строки — <cat id="3000">. Других игроков
+  // нет, поэтому места — пороги счёта (places, придуманы), в таблице они видны строками «Порог N
+  // места». Остальное придумано: базы «Ночного судака», «Червя на Разливе», «Змеелова» (угорь),
+  // «Форельного» (форель радужная), длительность, смещения (offset, минуты от начала часа
+  // по UTC), уровни и призы (prizes: 1, 2, 3 место, участие). Турнирный жетон (1515) по своему
+  // описанию «можно выиграть в турнире». Счёт веса — в граммах.
+  "tournaments": [
+    { "template": 1, "base": 1, "task": 1, "species": 78, "every": 60, "minutes": 40, "places": [25, 15, 8],
+      "prizes": [{ "items": [[1515, 3]], "experience": 1500 }, { "items": [[1515, 2]], "experience": 1000 }, { "items": [[1515, 1]], "experience": 500 }, { "experience": 200 }] },
+    { "template": 2, "base": 6, "task": 4, "species": 38, "every": 120, "minutes": 60, "places": [8000, 5000, 2500],
+      "prizes": [{ "items": [[1515, 3]], "experience": 2000 }, { "items": [[1515, 2]], "experience": 1200 }, { "items": [[1515, 1]], "experience": 600 }, { "experience": 300 }] },
+    { "template": 3, "base": 3, "task": 8, "species": 105, "every": 120, "offset": 60, "minutes": 60, "places": [6000, 4000, 2000],
+      "prizes": [{ "items": [[1515, 4]], "experience": 3000 }, { "items": [[1515, 2]], "experience": 1800 }, { "items": [[1515, 1]], "experience": 900 }, { "experience": 400 }] },
+    { "template": 4, "base": 7, "task": 7, "bait": 1010, "every": 120, "minutes": 60, "places": [40, 25, 12],
+      "prizes": [{ "items": [[1515, 4]], "experience": 4000 }, { "items": [[1515, 2]], "experience": 2500 }, { "items": [[1515, 1]], "experience": 1200 }, { "experience": 500 }] },
+    { "template": 5, "base": 7, "task": 6, "species": 111, "every": 240, "offset": 90, "minutes": 90, "places": [12000, 8000, 4000],
+      "prizes": [{ "items": [[1515, 5]], "experience": 5000 }, { "items": [[1515, 3]], "experience": 3000 }, { "items": [[1515, 1]], "experience": 1500 }, { "experience": 600 }] },
+    { "template": 6, "base": 4, "task": 10, "species": 50, "every": 120, "offset": 30, "minutes": 60, "places": [3000, 2000, 1000],
+      "prizes": [{ "items": [[1515, 4]], "experience": 4000 }, { "items": [[1515, 2]], "experience": 2500 }, { "items": [[1515, 1]], "experience": 1200 }, { "experience": 500 }] },
+    { "template": 7, "base": 7, "task": 10, "every": 120, "offset": 60, "minutes": 60, "places": [20000, 12000, 6000],
+      "prizes": [{ "items": [[1515, 5]], "experience": 5000 }, { "items": [[1515, 3]], "experience": 3000 }, { "items": [[1515, 1]], "experience": 1500 }, { "experience": 600 }] }
+  ]
+}

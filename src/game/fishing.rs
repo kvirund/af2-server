@@ -10,7 +10,7 @@ use anyhow::Result;
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, board, cards, character, effects, keepnet, inventory, loot, reputation, vip, vitals, perks};
+use super::{Bite, Outcome, Session, active, board, cards, character, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species, TraitSettings};
 use crate::messages as msg;
@@ -371,6 +371,12 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     catches.count += 1;
     catches.grams += i64::from(fish.grams);
     let grams = fish.grams;
+    let rod_kind = reputation::rod_kind(&conn.world.catalog, &player.data.items, bite.bait_item);
+    if let Some(kind) = rod_kind {
+        player.rod_kinds.insert(fish.id, kind);
+    }
+    deeds::landed(conn, player, &fish, rod_kind).await?;
+    tournaments::landed(conn, player, &fish).await?;
     player.landed.insert(fish.id, fish);
     reputation::fish_landed(conn, player, bite.bait_item, grams).await?;
     inventory::use_up(conn, player, bite.bait_item, conn.world.settings.fishing.bait_per_catch).await?;
@@ -384,6 +390,7 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let player = active(&mut session.player)?;
     let conn = &session.conn;
 
+    let rod_kind = player.rod_kinds.remove(&id);
     let Some(fish) = player.landed.remove(&id) else {
         conn.log(&format!("   kept unknown fish {id}"));
         return Ok(Outcome::Unanswered);
@@ -414,6 +421,7 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     conn.log(&format!("   -> 1135 kept fish {id}, record: {is_record}"));
     if let Some(fish) = for_tasks {
         board::fish_kept(conn, player, &fish).await?;
+        quests::fish_kept(conn, player, &fish, rod_kind).await?;
     }
     Ok(Outcome::Answered)
 }

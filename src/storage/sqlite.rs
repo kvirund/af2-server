@@ -39,6 +39,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "records", "location", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "records", "bait", &format!("INTEGER NOT NULL DEFAULT {UNKNOWN_BAIT}")).await?;
     add_column(pool, "items", "param", "INTEGER NOT NULL DEFAULT 0").await?;
+    add_column(pool, "board_tasks", "kind", "INTEGER NOT NULL DEFAULT 1").await?;
     add_column(pool, "characters", "vip_until", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "fish", "traits", "TEXT NOT NULL DEFAULT ''").await?;
     Ok(())
@@ -141,7 +142,7 @@ impl SqliteStorage {
                 .await?;
         }
         for task in &character.board_tasks {
-            sqlx::query("INSERT INTO board_tasks (id, character_id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            sqlx::query("INSERT INTO board_tasks (id, character_id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                 .bind(task.id)
                 .bind(id)
                 .bind(task.base)
@@ -157,6 +158,7 @@ impl SqliteStorage {
                 .bind(task.progress)
                 .bind(&task.reward)
                 .bind(task.ends_at)
+                .bind(task.kind)
                 .execute(&mut **transaction)
                 .await?;
         }
@@ -298,8 +300,8 @@ impl Storage for SqliteStorage {
                 .await?;
 
         #[allow(clippy::type_complexity)]
-        let board_tasks: Vec<(i64, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, String, i64)> = sqlx::query_as(
-            "SELECT id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at FROM board_tasks WHERE character_id = ? ORDER BY id",
+        let board_tasks: Vec<(i64, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, String, i64, i32)> = sqlx::query_as(
+            "SELECT id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at, kind FROM board_tasks WHERE character_id = ? ORDER BY id",
         )
         .bind(id)
         .fetch_all(&self.pool)
@@ -367,8 +369,9 @@ impl Storage for SqliteStorage {
             healed_at,
             board_tasks: board_tasks
                 .into_iter()
-                .map(|(id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at)| BoardTask {
+                .map(|(id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at, kind)| BoardTask {
                     id,
+                    kind,
                     base,
                     category,
                     task,

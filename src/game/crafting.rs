@@ -6,7 +6,7 @@ use rand::random;
 
 use std::collections::HashMap;
 
-use super::{Outcome, Session, active, character, inventory, keepnet, perks, vitals};
+use super::{Outcome, Session, active, character, inventory, keepnet, perks, quests, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{CatalogItem, Recipe};
 use crate::messages as msg;
@@ -329,6 +329,7 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         taken.items.len(),
         taken.fish.len()
     ));
+    quests::item_made(conn, player, template, count).await?;
     Ok(Outcome::Answered)
 }
 

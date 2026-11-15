@@ -57,6 +57,10 @@ pub const CHARACTER_CARD: i32 = 32;
 pub const RECORDS: i32 = 40;
 pub const TITLES: i32 = 101;
 pub const ACHIEVEMENTS: i32 = 130;
+/// One deed record: a deed has opened.
+pub const DEED_OPENED: i32 = 131;
+/// One deed record: a deed is done (fanfare).
+pub const DEED_DONE: i32 = 132;
 pub const AUCTION: i32 = 330;
 pub const ARTELS: i32 = 450;
 pub const STATISTICS: i32 = 1150;
@@ -106,6 +110,14 @@ pub const BOARD: i32 = 700;
 /// C→S int tab: give up that tab's tasks. S→C the tournaments.
 pub const BOARD_REFUSE: i32 = 705;
 pub const TOURNAMENTS: i32 = 705;
+/// A tournament record: it has started for the player.
+pub const TOURNAMENT_STARTED: i32 = 808;
+/// A tournament record and its table rows.
+pub const TOURNAMENT_TABLE: i32 = 810;
+/// A tournament record: it is over.
+pub const TOURNAMENT_END: i32 = 812;
+/// A tournament record and its rows, in the result window.
+pub const TOURNAMENT_RESULT: i32 = 818;
 /// C→S long offer; S→C the answer as one `key=value` line.
 pub const BOARD_TAKE: i32 = 710;
 /// S→C {int command, long id} until the end: what happened to tasks.

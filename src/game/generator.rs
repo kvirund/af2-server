@@ -9,7 +9,7 @@
 use anyhow::Result;
 
 use super::dialog::{COUNT_MARK, close, open, option, replace, text};
-use super::{Conn, Outcome, Player, Session, active, inventory, reputation, travel};
+use super::{Conn, Outcome, Player, Session, active, inventory, quests, reputation, travel};
 use crate::afc::AfcMessage;
 use crate::config::GeneratorSettings;
 
@@ -90,6 +90,7 @@ pub async fn answer(session: &mut Session, message: &AfcMessage) -> Result<Outco
     conn.save(player).await?;
     conn.log(&format!("   generator took {amount} biofuel"));
     reputation::add(conn, player, generator.faction, generator.points * i64::from(amount)).await?;
+    quests::poured(conn, player, amount).await?;
     offer(conn, player, generator).await?;
     Ok(Outcome::Answered)
 }
