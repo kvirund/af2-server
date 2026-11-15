@@ -69,7 +69,11 @@ pub struct AfcReader<'a> {
     data: &'a [u8],
 }
 
-impl AfcReader<'_> {
+impl<'a> AfcReader<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+
     fn take(&mut self, count: usize) -> Result<&[u8]> {
         if self.data.len() < count {
             bail!("payload ended early");
@@ -85,6 +89,11 @@ impl AfcReader<'_> {
 
     pub fn remaining(&self) -> usize {
         self.data.len()
+    }
+
+    /// Everything not read yet.
+    pub fn rest(&mut self) -> &[u8] {
+        std::mem::take(&mut self.data)
     }
 
     pub fn skip(&mut self, count: usize) -> Result<()> {

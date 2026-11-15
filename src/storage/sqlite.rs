@@ -42,6 +42,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "board_tasks", "kind", "INTEGER NOT NULL DEFAULT 1").await?;
     add_column(pool, "characters", "vip_until", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "fish", "traits", "TEXT NOT NULL DEFAULT ''").await?;
+    add_column(pool, "characters", "appearance", "BLOB NOT NULL DEFAULT x''").await?;
     Ok(())
 }
 
@@ -206,19 +207,25 @@ impl Storage for SqliteStorage {
     }
 
     async fn list_characters(&self, account: i64) -> Result<Vec<CharacterSummary>> {
-        let rows: Vec<(i64, String, i32)> =
-            sqlx::query_as("SELECT id, name, level FROM characters WHERE account_id = ? ORDER BY id")
+        let rows: Vec<(i64, String, i32, Vec<u8>)> =
+            sqlx::query_as("SELECT id, name, level, appearance FROM characters WHERE account_id = ? ORDER BY id")
                 .bind(account)
                 .fetch_all(&self.pool)
                 .await?;
-        Ok(rows.into_iter().map(|(id, name, level)| CharacterSummary { id, name, level }).collect())
+        Ok(rows.into_iter().map(|(id, name, level, appearance)| CharacterSummary { id, name, level, appearance }).collect())
+    }
+
+    async fn name_taken(&self, name: &str) -> Result<bool> {
+        let names: Vec<(String,)> = sqlx::query_as("SELECT name FROM characters").fetch_all(&self.pool).await?;
+        let wanted = name.to_lowercase();
+        Ok(names.iter().any(|(name,)| name.to_lowercase() == wanted))
     }
 
     async fn create_character(&self, character: &CharacterData) -> Result<i64> {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
         let id = sqlx::query(
-            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until, appearance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(character.account)
         .bind(&character.name)
@@ -236,6 +243,7 @@ impl Storage for SqliteStorage {
         .bind(character.studying)
         .bind(character.healed_at)
         .bind(character.vip_until)
+        .bind(&character.appearance)
         .execute(&mut *transaction)
         .await?
         .last_insert_rowid();
@@ -268,6 +276,11 @@ impl Storage for SqliteStorage {
         .bind(id)
         .fetch_all(&self.pool)
         .await?;
+
+        let (appearance,): (Vec<u8>,) = sqlx::query_as("SELECT appearance FROM characters WHERE id = ?")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
 
         let records: Vec<(i32, i32, i32, i32)> =
             sqlx::query_as("SELECT species, grams, location, bait FROM records WHERE character_id = ?")
@@ -322,6 +335,7 @@ impl Storage for SqliteStorage {
         Ok(Some(CharacterData {
             id,
             account,
+            appearance,
             name,
             level,
             experience,
@@ -505,6 +519,7 @@ mod tests {
             vitals: Some(Vitals { values: [90.0, 80.5, 70.0, 60.0, 50.0], work_points: 12.5 }),
             items: vec![ItemEntry { id: 1, bag: 0, cell: 2, count: 10, durability: 1.5, template: 1010, param: 0 }, ItemEntry { id: 3, bag: 1, cell: 4, count: 2, durability: 1.0, template: 1309, param: 77 }],
             fish: vec![CaughtFish { id: 2, species: 7, grams: 300, size_class: 1, bait: 1016, list: 0, experience: 12, traits: vec![108] }],
+            appearance: vec![2, 3, 1, 4, 0, 1, 9, 8, 7, 6, 5, 4, 3, 2, 0, 0, 0, 1, 0],
             ..Default::default()
         };
         character.records.insert(7, Record { grams: 300, location: 4, bait: 1016 });
@@ -525,6 +540,11 @@ mod tests {
         character.money = 900;
         store.save_character(&character).await.unwrap();
         assert_eq!(store.load_character(character.id).await.unwrap().unwrap(), character);
+
+        let listed = store.list_characters(account).await.unwrap();
+        assert_eq!(listed[0].appearance, character.appearance);
+        assert!(store.name_taken("рыбак").await.unwrap());
+        assert!(!store.name_taken("Рыба").await.unwrap());
     }
 
     #[tokio::test]

@@ -27,6 +27,13 @@ pub const CURRENCY: i32 = 105;
 pub const PERSONAL_RECORD: i32 = 106;
 pub const CHARACTER_LIST: i32 = 110;
 pub const ENTER_WORLD: i32 = 111;
+/// C→S: «Отмена» in the character creator. S→C (int): open the creator.
+pub const CREATOR: i32 = 112;
+/// C→S (string): is the name free? S→C (bool): it is.
+pub const NAME_CHECK: i32 = 115;
+/// C→S: «Создать» in the character creator: string name, int 0, int sex, then
+/// the appearance bytes. S→C (int): too many characters.
+pub const CREATE_CHARACTER: i32 = 120;
 pub const TRAVEL_OPTIONS: i32 = 134;
 pub const TRAVEL_START: i32 = 136;
 pub const TRAVEL_ARRIVE: i32 = 137;

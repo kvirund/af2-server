@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::Local;
 
 use super::{Account, Conn, Outcome, Player, Session, board, cards, death, effects, inventory, keepnet, panels, perks, skills, titles, travel, vip, vitals};
-use crate::afc::{AfcMessage, AfcWriter};
+use crate::afc::{AfcMessage, AfcReader, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
 
@@ -14,10 +14,26 @@ const ANONYMOUS_KEY: &str = "local";
 
 /// The first entry is the sex, 1 for a man; the rest pick the first palette entry.
 const APPEARANCE: [u8; 17] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+/// The original's limit, from the client's (never shown) «Слишком много персонажей!».
+const MOST_CHARACTERS: usize = 5;
+const LONGEST_NAME: usize = 12;
+
+fn appearance_of(stored: &[u8]) -> &[u8] {
+    if stored.is_empty() { &APPEARANCE } else { stored }
+}
+
+/// The client's own check: letters of one alphabet, digits and `_`, at most
+/// twelve characters.
+fn name_allowed(name: &str) -> bool {
+    let fits = |letter: fn(char) -> bool| name.chars().all(|c| letter(c) || c.is_ascii_digit() || c == '_');
+    let cyrillic = |c: char| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё');
+    let latin = |c: char| c.is_ascii_alphabetic();
+    !name.is_empty() && name.chars().count() <= LONGEST_NAME && (fits(cyrillic) || fits(latin))
+}
 
 
 /// Client: long marker, string name, string password, string Steam id, string
-/// device id, string persona, bool Steam login, int pin.
+/// device id, string Steam persona, bool Steam login, int pin.
 ///
 /// The Steam id is what the client says it is: nothing proves it yet.
 pub async fn login(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
@@ -27,11 +43,11 @@ pub async fn login(session: &mut Session, message: &AfcMessage) -> Result<Outcom
     r.string()?;
     let steam_id = r.string()?;
     r.string()?;
-    let persona = r.string()?;
+    r.string()?;
 
     let key = if steam_id.is_empty() { ANONYMOUS_KEY } else { &steam_id };
     let id = session.conn.world.store.account_for(key).await?;
-    session.account = Some(Account { id, persona });
+    session.account = Some(Account { id });
 
     let mut w = AfcWriter::new();
     w.string("Ok").int32(id as i32).string(key).int32(0);
@@ -55,21 +71,26 @@ pub async fn currency(session: &mut Session) -> Result<Outcome> {
     Ok(Outcome::Answered)
 }
 
-/// Case 110, then 111: entering the world is the server's call and nothing else
-/// asks for it. There is no character creator yet, so the first visit makes one.
+/// Case 110, then 111 (the character screen). An account with no characters
+/// goes to the creator instead (112).
 pub async fn list(session: &mut Session) -> Result<Outcome> {
-    let (account, persona) = {
-        let account = session.account.as_ref().context("character list before login")?;
-        (account.id, account.persona.clone())
-    };
-
-    let world = session.conn.world.clone();
-    let mut characters = world.store.list_characters(account).await?;
+    let account = session.account.as_ref().context("character list before login")?.id;
+    let characters = session.conn.world.store.list_characters(account).await?;
     if characters.is_empty() {
-        create_first_character(&session.conn, account, &persona).await?;
-        characters = world.store.list_characters(account).await?;
+        let mut w = AfcWriter::new();
+        w.int32(0);
+        session.conn.send(msg::CREATOR, w.finish()).await?;
+        session.conn.log("   -> 112 no characters: the creator");
+        return Ok(Outcome::Answered);
     }
+    send_list(session).await
+}
 
+/// The character screen again: after «Отмена» in the creator, or a new character.
+async fn send_list(session: &mut Session) -> Result<Outcome> {
+    let account = session.account.as_ref().context("character list before login")?.id;
+    let world = session.conn.world.clone();
+    let characters = world.store.list_characters(account).await?;
     let start_base = world.settings.character.start_base;
     let mut w = AfcWriter::new();
     for character in &characters {
@@ -77,7 +98,8 @@ pub async fn list(session: &mut Session) -> Result<Outcome> {
         w.int32(0); // short costume id
         w.int32(start_base).int32(0); // base, location: 0 is standing on the base
         w.int64(0);
-        w.int32(APPEARANCE.len() as i32).bytes(&APPEARANCE);
+        let appearance = appearance_of(&character.appearance);
+        w.int32(appearance.len() as i32).bytes(appearance);
     }
     session.conn.send(msg::CHARACTER_LIST, w.finish()).await?;
     session.conn.send(msg::ENTER_WORLD, Vec::new()).await?;
@@ -85,7 +107,55 @@ pub async fn list(session: &mut Session) -> Result<Outcome> {
     Ok(Outcome::Answered)
 }
 
-async fn create_first_character(conn: &Conn, account: i64, persona: &str) -> Result<()> {
+/// Case 112 from the creator: «Отмена», back to the character screen.
+pub async fn cancel_creator(session: &mut Session) -> Result<Outcome> {
+    send_list(session).await
+}
+
+/// Case 115: string name → bool free.
+pub async fn check_name(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let name = message.reader().string()?.trim().to_owned();
+    let free = name_allowed(&name) && !session.conn.world.store.name_taken(&name).await?;
+    let mut w = AfcWriter::new();
+    w.boolean(free);
+    session.conn.send(msg::NAME_CHECK, w.finish()).await?;
+    session.conn.log(&format!("   -> 115 name \"{name}\" free: {free}"));
+    Ok(Outcome::Answered)
+}
+
+/// Case 120: string name, int 0, int sex, then the appearance bytes to the end.
+pub async fn create(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let account = session.account.as_ref().context("creating a character before login")?.id;
+    let (name, appearance) = read_creation(&mut message.reader())?;
+
+    let conn = &session.conn;
+    let world = conn.world.clone();
+    if world.store.list_characters(account).await?.len() >= MOST_CHARACTERS {
+        let mut w = AfcWriter::new();
+        w.int32(1);
+        conn.send(msg::CREATE_CHARACTER, w.finish()).await?;
+        conn.log("   -> 120 too many characters");
+        return send_list(session).await;
+    }
+    if !name_allowed(&name) || world.store.name_taken(&name).await? {
+        let mut w = AfcWriter::new();
+        w.boolean(false);
+        conn.send(msg::NAME_CHECK, w.finish()).await?;
+        conn.log(&format!("   -> 115 cannot create \"{name}\": the name is taken or not allowed"));
+        return Ok(Outcome::Answered);
+    }
+    create_character(conn, account, &name, appearance).await?;
+    send_list(session).await
+}
+
+fn read_creation(r: &mut AfcReader) -> Result<(String, Vec<u8>)> {
+    let name = r.string()?.trim().to_owned();
+    r.int32()?;
+    r.int32()?;
+    Ok((name, r.rest().to_vec()))
+}
+
+async fn create_character(conn: &Conn, account: i64, name: &str, appearance: Vec<u8>) -> Result<()> {
     let world = &conn.world;
     let settings = &world.settings.character;
 
@@ -103,10 +173,10 @@ async fn create_first_character(conn: &Conn, account: i64, persona: &str) -> Res
         });
     }
 
-    let name = if persona.is_empty() { &settings.name } else { persona };
     let character = CharacterData {
         account,
         name: name.to_owned(),
+        appearance,
         level: settings.level,
         money: settings.starting_money,
         premium: settings.premium_money,
@@ -189,7 +259,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     let mut w = AfcWriter::new();
     w.int64(character.id);
     w.string(&character.name);
-    w.int32(1).int32(character.level).int32(0); // sex, level, unknown
+    w.int32(i32::from(appearance_of(&character.appearance)[0])).int32(character.level).int32(0); // sex, level, unknown
     w.int64(character.experience).int64(progression.experience_needed(character.level, perks::effects(conn, player).level_cost));
     w.int64(character.money).int64(character.premium);
     w.string("");
@@ -217,7 +287,8 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     for bag in 1..=bags.pages {
         w.int32(panels::cells_in(bags, character, bag));
     }
-    w.int32(APPEARANCE.len() as i32).bytes(&APPEARANCE);
+    let appearance = appearance_of(&character.appearance);
+    w.int32(appearance.len() as i32).bytes(appearance);
     conn.send(message_id, w.finish()).await
 }
 
@@ -296,6 +367,38 @@ pub async fn send_money(conn: &Conn, player: &Player, change: i64) -> Result<()>
 mod tests {
     use super::*;
     use crate::config::ProgressionSettings;
+
+    #[test]
+    fn names_follow_the_client_rule() {
+        assert!(name_allowed("Антон"));
+        assert!(name_allowed("Fisher_42"));
+        assert!(name_allowed("Ёжик"));
+        assert!(!name_allowed("Антон Горев"));
+        assert!(!name_allowed("АнтонFisher"));
+        assert!(!name_allowed(""));
+        assert!(!name_allowed("Тринадцатьбук"));
+        assert!(name_allowed("Двенадцатьбу"));
+    }
+
+    #[test]
+    fn the_creator_sends_a_name_and_the_appearance() {
+        // A real 120 from the client: «Тоха», a man, beard and moustache.
+        let payload = [
+            0x08, 0x00, 0xD0, 0xA2, 0xD0, 0xBE, 0xD1, 0x85, 0xD0, 0xB0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0xDB,
+            0x8B, 0x42, 0x52, 0xDB, 0x8B, 0x42, 0x52, 0, 0, 0, 1, 1,
+        ];
+        let (name, appearance) = read_creation(&mut AfcReader::new(&payload)).unwrap();
+        assert_eq!(name, "Тоха");
+        assert_eq!(appearance.len(), 19);
+        assert_eq!(appearance[0], 1);
+        assert_eq!(&appearance[17..], &[1, 1]);
+    }
+
+    #[test]
+    fn a_character_without_appearance_is_the_default_man() {
+        assert_eq!(appearance_of(&[]), &APPEARANCE);
+        assert_eq!(appearance_of(&[2, 1]), &[2, 1]);
+    }
 
     fn progression() -> ProgressionSettings {
         ProgressionSettings {

@@ -153,7 +153,6 @@ impl Player {
 
 pub struct Account {
     pub id: i64,
-    pub persona: String,
 }
 
 pub struct Session {
@@ -194,6 +193,9 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::CURRENCY => character::currency(session).await,
         msg::CHARACTER_LIST => character::list(session).await,
         msg::GO_TO_GAME => character::go_to_game(session, message).await,
+        msg::CREATOR => character::cancel_creator(session).await,
+        msg::NAME_CHECK if session.player.is_none() => character::check_name(session, message).await,
+        msg::CREATE_CHARACTER if session.player.is_none() => character::create(session, message).await,
 
         msg::TRAVEL | msg::TRAVEL_ARRIVE => travel::go(session, message).await,
         msg::WALK_ON => travel::walk_on(session, message).await,

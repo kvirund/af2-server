@@ -25,7 +25,6 @@ pub struct ServerSettings {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterSettings {
-    pub name: String,
     pub level: i32,
     pub starting_money: i64,
     pub premium_money: i64,

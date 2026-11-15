@@ -123,6 +123,10 @@ pub struct CharacterData {
     pub vitals: Option<Vitals>,
     /// Tasks taken from the boards and not finished yet.
     pub board_tasks: Vec<BoardTask>,
+    /// What the creator chose, as `Character.initShadowsParams` reads it: sex
+    /// (1 a man), hair, top and bottom colours and camouflages, eight
+    /// camouflage bytes, three unused, beard, moustache. Empty for a default man.
+    pub appearance: Vec<u8>,
 }
 
 /// A task taken from a base's board. It counts only fish caught at that base.
@@ -162,6 +166,7 @@ pub struct CharacterSummary {
     pub id: i64,
     pub name: String,
     pub level: i32,
+    pub appearance: Vec<u8>,
 }
 
 /// A gather point of a base scene, shared by every player.
@@ -183,6 +188,9 @@ pub trait Storage: Send + Sync {
     async fn account_for(&self, key: &str) -> Result<i64>;
 
     async fn list_characters(&self, account: i64) -> Result<Vec<CharacterSummary>>;
+
+    /// Whether any character, on any account, has this name (case ignored).
+    async fn name_taken(&self, name: &str) -> Result<bool>;
 
     /// Stores a new character and returns its id; `character.id` is ignored.
     async fn create_character(&self, character: &CharacterData) -> Result<i64>;
