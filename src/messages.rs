@@ -56,6 +56,8 @@ pub const REPUTATION_GAINED: i32 = 307;
 pub const CHARACTER_CARD: i32 = 32;
 pub const RECORDS: i32 = 40;
 pub const TITLES: i32 = 101;
+/// S→C: the character died. Client: int 0, back to life.
+pub const DEATH: i32 = 905;
 /// Client: int title, the one to show.
 pub const TITLE_CHOOSE: i32 = 102;
 /// int title: the one shown now.

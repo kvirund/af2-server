@@ -182,7 +182,10 @@ pub struct VitalsSettings {
     pub stamina_per_fish: f32,
     pub stamina_per_kg: f32,
     pub radiation_per_minute_per_point: f32,
-    pub lowest_life: f32,
+    /// The share of the current level's experience a death takes.
+    pub death_experience_percent: f64,
+    /// The share of each maximum the scales come back at after a death.
+    pub respawn_percent: f32,
     pub work_points_per_minute: f32,
     /// Work points every kilogram of a landed fish gives.
     pub work_points_per_kg: f32,
@@ -493,6 +496,9 @@ pub struct TitleRule {
     /// At least this character level.
     #[serde(default)]
     pub level: i32,
+    /// Minutes in play without a death.
+    #[serde(default)]
+    pub alive_minutes: i32,
     /// Personal records in at least this many species.
     #[serde(default)]
     pub records: i32,

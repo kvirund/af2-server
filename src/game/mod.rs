@@ -6,6 +6,7 @@ mod cards;
 mod chat;
 mod character;
 mod crafting;
+mod death;
 mod deeds;
 mod dialog;
 mod doctor;
@@ -122,6 +123,8 @@ pub struct Player {
     pub vip_skill_points: f64,
     pub last_vip_tick: Instant,
     pub last_title_check: Instant,
+    /// Life ran out and the client has not asked to come back yet.
+    pub dead: bool,
 }
 
 impl Player {
@@ -143,6 +146,7 @@ impl Player {
             vip_skill_points: 0.0,
             last_vip_tick: now,
             last_title_check: now,
+            dead: false,
         }
     }
 }
@@ -249,6 +253,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::ACHIEVEMENTS if matches!(message.reader().int32(), Ok(0)) => deeds::tab(session).await,
         msg::TITLES if matches!(message.reader().int32(), Ok(0)) => titles::tab(session).await,
         msg::TITLE_CHOOSE => titles::choose(session, message).await,
+        msg::DEATH => death::respawn(session).await,
         id @ (msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }

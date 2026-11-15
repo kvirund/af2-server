@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use chrono::Local;
 
-use super::{Account, Conn, Outcome, Player, Session, board, cards, effects, inventory, keepnet, panels, perks, skills, titles, travel, vip, vitals};
+use super::{Account, Conn, Outcome, Player, Session, board, cards, death, effects, inventory, keepnet, panels, perks, skills, titles, travel, vip, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
@@ -142,6 +142,10 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     let player = session.player.insert(Player::new(data));
     let (progression, level) = (&world.settings.progression, player.data.level);
     player.data.vitals.get_or_insert_with(|| vitals::full(progression, level));
+    if death::is_dead(&player.data) {
+        death::revive(&world.settings, &world.catalog, &mut player.data);
+        session.conn.log("   left the game dead: back to life without a second loss");
+    }
     let kind_of = |template| world.catalog.get(template).map_or(0, |item| item.kind);
     let moved = inventory::move_old_backpack(&world.settings.bags, &mut player.data, kind_of);
     let info = |template| {

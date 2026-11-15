@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use std::collections::BTreeMap;
 
-use super::{Conn, Outcome, Player, Session, active, fishing, fridge, inventory, perks, titles, travel};
+use super::{Conn, Outcome, Player, Session, active, death, fishing, fridge, inventory, perks, titles, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{DoctorSettings, ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
@@ -95,14 +95,13 @@ fn advance(settings: &VitalsSettings, maxima: &[f32; COUNT], vitals: &mut Vitals
         values[STAMINA] += settings.rest_stamina_per_minute * minutes;
     }
     vitals.work_points = (vitals.work_points + settings.work_points_per_minute * minutes).min(settings.max_work_points);
-    keep_in_range(settings, maxima, vitals);
+    keep_in_range(maxima, vitals);
 }
 
-fn keep_in_range(settings: &VitalsSettings, maxima: &[f32; COUNT], vitals: &mut Vitals) {
+fn keep_in_range(maxima: &[f32; COUNT], vitals: &mut Vitals) {
     for (value, max) in vitals.values.iter_mut().zip(maxima) {
         *value = value.clamp(0.0, *max);
     }
-    vitals.values[LIFE] = vitals.values[LIFE].max(settings.lowest_life);
 }
 
 /// Radiation where the character stands: the top of the base's range at night,
@@ -123,6 +122,9 @@ pub async fn tick(session: &mut Session) -> Result<()> {
     let Some(player) = session.player.as_mut() else {
         return Ok(());
     };
+    if player.dead {
+        return Ok(());
+    }
     let conn = &session.conn;
     let settings = &conn.world.settings;
     let seconds = player.last_tick.elapsed().as_secs_f32();
@@ -141,6 +143,9 @@ pub async fn tick(session: &mut Session) -> Result<()> {
         advance(&settings.vitals, &limits, vitals, &passing);
     }
     send(conn, player).await?;
+    if death::is_dead(&player.data) {
+        return death::die(conn, player).await;
+    }
 
     if player.last_save.elapsed().as_secs_f32() >= settings.vitals.save_every_seconds {
         player.last_save = Instant::now();
@@ -183,7 +188,7 @@ pub fn heal(settings: &Settings, catalog: &crate::config::Catalog, character: &m
         vitals.values[RADIATION] += doctor.radiation;
         vitals.values[FOOD] += doctor.food;
         vitals.values[WATER] += doctor.water;
-        keep_in_range(&settings.vitals, &limits, vitals);
+        keep_in_range(&limits, vitals);
     }
 }
 
@@ -243,7 +248,7 @@ pub async fn use_item(session: &mut Session, message: &AfcMessage) -> Result<Out
         for (target, change) in changes {
             vitals.values[target] += change;
         }
-        keep_in_range(&settings.vitals, &limits, vitals);
+        keep_in_range(&limits, vitals);
     }
     inventory::remove_one(&mut player.data, id);
     match kind {
@@ -276,7 +281,8 @@ mod tests {
             stamina_per_fish: 1.0,
             stamina_per_kg: 0.5,
             radiation_per_minute_per_point: 0.1,
-            lowest_life: 1.0,
+            death_experience_percent: 10.0,
+            respawn_percent: 50.0,
             work_points_per_minute: 10.0,
             work_points_per_kg: 1.0,
             max_work_points: 3000.0,
@@ -315,8 +321,8 @@ mod tests {
     }
 
     #[test]
-    fn life_stops_at_the_lowest_value() {
-        assert_eq!(after_a_minute([2.0, 50.0, 100.0, 100.0, 0.0], 0.0, false).values[LIFE], 1.0);
+    fn life_runs_out_at_zero() {
+        assert_eq!(after_a_minute([2.0, 50.0, 100.0, 100.0, 0.0], 0.0, false).values[LIFE], 0.0);
     }
 
     #[test]

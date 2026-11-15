@@ -16,7 +16,7 @@ use std::time::Instant;
 use anyhow::Result;
 use chrono::{Local, TimeDelta, Utc};
 
-use super::{Conn, Outcome, Player, Session, active, chat, doctor, reputation, travel, vip};
+use super::{Conn, Outcome, Player, Session, active, chat, death, doctor, reputation, travel, vip};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{ReputationSettings, TitleRule};
 use crate::messages as msg;
@@ -95,6 +95,10 @@ fn earned(factions: &ReputationSettings, character: &CharacterData, rule: &Title
         any = true;
         holds &= character.level >= rule.level;
     }
+    if rule.alive_minutes > 0 {
+        any = true;
+        holds &= i64::from(value(character, death::ALIVE_KEY)) >= i64::from(rule.alive_minutes) * 60;
+    }
     if rule.records > 0 {
         any = true;
         holds &= character.records.len() >= rule.records as usize;
@@ -152,10 +156,15 @@ pub async fn tick(session: &mut Session) -> Result<()> {
     let Some(player) = session.player.as_mut() else {
         return Ok(());
     };
-    if player.last_title_check.elapsed().as_secs() < CHECK_SECONDS {
+    let seconds = player.last_title_check.elapsed().as_secs();
+    if seconds < CHECK_SECONDS {
         return Ok(());
     }
     player.last_title_check = Instant::now();
+    if !player.dead {
+        let alive = player.data.quest_values.entry(death::ALIVE_KEY.into()).or_insert(0);
+        *alive = alive.saturating_add(seconds as i32);
+    }
     check(&session.conn, player).await
 }
 
@@ -283,6 +292,12 @@ mod tests {
         assert!(!earned(&settings, &character, &fisher, false));
         character.catches.insert(5, Catches { count: 1, grams: 10 });
         assert!(earned(&settings, &character, &fisher, false));
+
+        let survivor = TitleRule { title: 120, alive_minutes: 2, ..Default::default() };
+        character.quest_values.insert(death::ALIVE_KEY.into(), 119);
+        assert!(!earned(&settings, &character, &survivor, false));
+        character.quest_values.insert(death::ALIVE_KEY.into(), 120);
+        assert!(earned(&settings, &character, &survivor, false));
 
         let donor = TitleRule { title: 127, vip: true, ..Default::default() };
         assert!(earned(&settings, &character, &donor, true));
