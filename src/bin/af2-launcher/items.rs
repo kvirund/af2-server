@@ -25,6 +25,9 @@ struct Item {
     /// What «Переработать» gives, as the client's refine window shows it.
     refine: String,
     name: String,
+    /// The `costWpn=` line: pieces of another item asked on top of the price,
+    /// [item, pieces], or zeros.
+    cost_item: [i32; 2],
 }
 
 fn pattern(text: &str) -> Regex {
@@ -63,6 +66,7 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
     let max_count = pattern(r"(?m)^maxcount=(.*)$");
     let refine = pattern(r"(?m)^refine=(.*)$");
     let name = pattern(r"(?m)^iname=(.*)$");
+    let cost_wpn = pattern(r"(?m)^costWpn=(.*)$");
     let definition = pattern(r"(?s)<wpn_add.*?</wpn_add>");
     let durability = pattern(r"(?s)<defDur>(.*?)</defDur>");
     let line_breaks = pattern(r"\\[rn]");
@@ -98,13 +102,23 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
             xml,
             refine: capture(&refine, block).unwrap_or("").trim().to_string(),
             name: capture(&name, block).unwrap_or("").trim().to_string(),
+            cost_item: item_price(capture(&cost_wpn, block).unwrap_or("")),
         });
     }
     Ok(items)
 }
 
+/// "1179/60" or "1179/60/0": the item and how many; anything else is none.
+fn item_price(text: &str) -> [i32; 2] {
+    let mut fields = text.trim().split('/').map(|field| field.trim().parse::<i32>().unwrap_or(0));
+    match (fields.next(), fields.next()) {
+        (Some(item), Some(pieces)) if item > 0 && pieces > 0 => [item, pieces],
+        _ => [0, 0],
+    }
+}
+
 /// A file without this field was made by an older version and is made again.
-const CURRENT_FIELD: &str = "\"name\"";
+const CURRENT_FIELD: &str = "\"cost_item\"";
 
 /// Does nothing once the file exists: it only depends on the installed game.
 pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
@@ -128,7 +142,7 @@ pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\niname=Box\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
+    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\niname=Box\r\ncostWpn=1179/60/0\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
 
     #[test]
     fn extracts_every_field() {
@@ -145,7 +159,16 @@ mod tests {
             xml: "<wpn_add><base><tid>7</tid><quality>0</quality><name>x</name></base><defDur>2.5</defDur></wpn_add>".into(),
             refine: "1391/1/100".into(),
             name: "Box".into(),
+            cost_item: [1179, 60],
         });
+    }
+
+    #[test]
+    fn a_price_in_items_needs_both_numbers() {
+        assert_eq!(item_price("1515/1"), [1515, 1]);
+        assert_eq!(item_price("1094/2/1"), [1094, 2]);
+        assert_eq!(item_price("0"), [0, 0]);
+        assert_eq!(item_price(""), [0, 0]);
     }
 
     #[test]

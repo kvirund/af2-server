@@ -781,7 +781,7 @@ mod tests {
     use super::*;
 
     fn catalog_item(stacks: bool, cost: i64) -> CatalogItem {
-        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new() }
+        CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0] }
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {

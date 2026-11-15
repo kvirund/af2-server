@@ -31,12 +31,26 @@ fn on_sale<'a>(conn: &'a Conn, player: &Player) -> Vec<&'a CatalogItem> {
         Some(ids) => ids
             .iter()
             .filter_map(|id| world.catalog.get(*id))
-            .filter(|item| item.cost > 0 || item.premium_cost > 0)
+            .filter(|item| item.cost > 0 || item.premium_cost > 0 || item.cost_item[0] > 0)
             .collect(),
         None => world.catalog.for_sale().collect(),
     };
     // Recipes the character knows for good are left out: the client cannot say so.
     stock.into_iter().filter(|item| !crafting::teaches_nothing_new(&world.recipes, &player.data, item)).collect()
+}
+
+/// What else the item costs: [item, pieces] per purchase, or `None`.
+fn item_price(settings: &ShopSettings, item: &CatalogItem) -> Option<[i32; 2]> {
+    let [template, pieces] = item.cost_item;
+    (template > 0 && pieces > 0 && !settings.no_item_price.contains(&item.id)).then_some([template, pieces])
+}
+
+/// "money|premium|item/pieces", as the client splits it (it reads '/' as '|').
+fn price_text(settings: &ShopSettings, item: &CatalogItem) -> String {
+    match item_price(settings, item) {
+        Some([template, pieces]) => format!("{}|{}|{template}/{pieces}", item.cost, item.premium_cost),
+        None => format!("{}|{}|0", item.cost, item.premium_cost),
+    }
 }
 
 fn digits_as_numbers(text: &str) -> Vec<i32> {
@@ -47,7 +61,9 @@ fn digits_as_numbers(text: &str) -> Vec<i32> {
 /// window opens and 1300 when a tab is chosen.
 ///
 /// Reply case 1300: int shop, int n, n x (int category, int item count), int m,
-/// m x (int template, string "money|premium|item", 3 x double, bool can be bought). With `false` the client refuses the purchase.
+/// m x (int template, string "money|premium|item/pieces", 3 x double, bool can be
+/// bought). With `false` the client refuses the purchase. The pieces of the item
+/// (Trophy Hunter's tokens, mostly) are asked together with the money.
 pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
     let mut r = message.reader();
     let shop = r.int32()?;
@@ -77,7 +93,7 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
     w.int32(listed.len() as i32);
     for item in &listed {
-        w.int32(item.id).string(&format!("{}|{}|0", item.cost, item.premium_cost));
+        w.int32(item.id).string(&price_text(&conn.world.settings.shop, item));
         w.double(0.0).double(0.0).double(0.0).boolean(level_allows(&conn.world.settings.shop, level, item));
     }
     conn.send(msg::SHOP_LIST, w.finish()).await?;
@@ -113,6 +129,15 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
         return Ok(Outcome::Answered);
     }
 
+    let wanted = item_price(&world.settings.shop, item).map(|[template, pieces]| (template, pieces * count));
+    if let Some((template, pieces)) = wanted
+        && inventory::pieces_carried(&player.data, template) < pieces
+    {
+        send_status(conn, "no_money=0").await?;
+        conn.log(&format!("   -> 1310 buying {} x{count} needs {pieces} of item {template}", item.id));
+        return Ok(Outcome::Answered);
+    }
+
     let before = player.data.money;
     match inventory::buy(conn, player, item, count).await? {
         Err(error) => {
@@ -120,6 +145,16 @@ pub async fn buy(session: &mut Session, message: &AfcMessage) -> Result<Outcome>
             conn.log(&format!("   -> 1310 cannot buy {template} x{count}: {}", error.status()));
         }
         Ok(changed) => {
+            if let Some((template, pieces)) = wanted
+                && let Some((smaller, gone)) = inventory::take_carried(&mut player.data, template, pieces)
+            {
+                conn.save(player).await?;
+                for id in gone {
+                    inventory::send_removed(conn, id).await?;
+                }
+                inventory::send_updates(conn, player.data.id, &smaller).await?;
+                conn.log(&format!("   -> 181/190 paid {pieces} of item {template}"));
+            }
             inventory::send_updates(conn, player.data.id, &changed).await?;
             character::send_money(conn, player, player.data.money - before).await?;
             send_status(conn, &format!("ok={template}/{count}/0")).await?;
@@ -135,7 +170,16 @@ mod tests {
     use crate::config::ShopStock;
 
     fn item(xml: &str) -> CatalogItem {
-        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: xml.to_owned(), refine: String::new(), name: String::new() }
+        CatalogItem { id: 1, kind: 1, cost: 1, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: xml.to_owned(), refine: String::new(), name: String::new(), cost_item: [0, 0] }
+    }
+
+    #[test]
+    fn tokens_go_with_the_money_unless_switched_off() {
+        let line = CatalogItem { id: 1472, cost: 21000, cost_item: [1179, 60], ..item("") };
+        assert_eq!(price_text(&ShopSettings::default(), &line), "21000|0|1179/60");
+        let off = ShopSettings { no_item_price: vec![1472], ..Default::default() };
+        assert_eq!(price_text(&off, &line), "21000|0|0");
+        assert_eq!(item_price(&off, &line), None);
     }
 
     #[test]

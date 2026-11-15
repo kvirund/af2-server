@@ -205,6 +205,9 @@ pub struct ShopSettings {
     pub hidden_items: Vec<i32>,
     /// Item id to price, replacing the price in the client's data.
     pub prices: BTreeMap<i32, i64>,
+    /// Items sold without the client's price in other items (`costWpn`).
+    #[serde(default)]
+    pub no_item_price: Vec<i32>,
 }
 
 /// `config/gathering.json`: what grows and lies at the gather points of each base.
@@ -767,6 +770,10 @@ pub struct CatalogItem {
     /// The `iname=` line, the item's name; `{0}` in a fish card's.
     #[serde(default)]
     pub name: String,
+    /// Pieces of another item asked on top of the price (`costWpn=`): [item,
+    /// pieces], zeros for none.
+    #[serde(default)]
+    pub cost_item: [i32; 2],
     /// Price in ergs, the premium money, for an item with no price in credits:
     /// the `pricePt` of its description, set when the settings are applied.
     #[serde(skip)]
@@ -797,7 +804,7 @@ impl Catalog {
     }
 
     pub fn for_sale(&self) -> impl Iterator<Item = &CatalogItem> {
-        self.items.iter().filter(|item| item.cost > 0)
+        self.items.iter().filter(|item| item.cost > 0 || item.cost_item[0] > 0)
     }
 }
 
@@ -931,6 +938,7 @@ mod tests {
             xml: "<priceCr>0</priceCr><pricePt>20</pricePt>".into(),
             refine: String::new(),
             name: String::new(),
+            cost_item: [0, 0],
         };
         let prices = |mut item: CatalogItem| {
             shop.adjust(&mut item);
@@ -951,7 +959,7 @@ mod tests {
             prices: [(5, 1000)].into(),
             ..Default::default()
         };
-        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new() };
+        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0] };
         let cost = |mut item: CatalogItem| {
             shop.adjust(&mut item);
             item.cost
