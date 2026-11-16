@@ -18,13 +18,14 @@ use anyhow::{Context, Result, bail};
 use choice::Target;
 use local_server::LocalServer;
 
-const USAGE: &str = "af2-launcher [--server local|<адрес>] [--game <папка игры>] [--no-launch] [--status] [--restore]
+const USAGE: &str = "af2-launcher [--server local|<адрес>] [--game <папка игры>] [--no-launch] [--status] [--restore] [--extract]
 
   --server     выбрать сервер без меню
   --game       папка игры, если Steam не находит её сам
   --no-launch  подготовить всё, но не запускать игру
   --status     показать адрес, записанный в клиенте
-  --restore    вернуть клиенту исходный адрес";
+  --restore    вернуть клиенту исходный адрес
+  --extract    только извлечь данные игры в data/ (предметы, рецепты, навыки)";
 
 #[derive(Default)]
 struct Options {
@@ -33,6 +34,7 @@ struct Options {
     no_launch: bool,
     status: bool,
     restore: bool,
+    extract: bool,
 }
 
 fn parse_options() -> Result<Option<Options>> {
@@ -46,6 +48,7 @@ fn parse_options() -> Result<Option<Options>> {
             "--no-launch" => options.no_launch = true,
             "--status" => options.status = true,
             "--restore" => options.restore = true,
+            "--extract" => options.extract = true,
             "-h" | "--help" => return Ok(None),
             other => bail!("неизвестный параметр {other}\n{USAGE}"),
         }
@@ -95,6 +98,9 @@ fn run(options: Options) -> Result<()> {
     items::ensure_extracted(&game, &data_dir)?;
     recipes::ensure_extracted(&game, &data_dir)?;
     skills::ensure_extracted(&game, &data_dir)?;
+    if options.extract {
+        return Ok(());
+    }
     let target = choice::choose(&config_dir, &data_dir, options.server)?;
     point_client_at(&game, target.host())?;
 

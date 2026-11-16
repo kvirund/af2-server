@@ -70,6 +70,7 @@ pub struct AfcReader<'a> {
 }
 
 impl<'a> AfcReader<'a> {
+    #[cfg(test)]
     pub fn new(data: &'a [u8]) -> Self {
         Self { data }
     }

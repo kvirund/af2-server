@@ -21,6 +21,25 @@ pub struct ItemEntry {
     /// What this one piece is of, where the template leaves it open: the
     /// species of a fish card. 0 for everything else.
     pub param: i32,
+    /// A thing built in «Конструирование»: the extra parts of components A,
+    /// B and C, then the «Механик» level of its maker. Zeros for everything else.
+    pub parts: [i32; 4],
+}
+
+/// How `parts` is kept: "a/b/c/d", empty for none.
+pub fn parts_text(parts: &[i32; 4]) -> String {
+    if *parts == [0; 4] {
+        return String::new();
+    }
+    parts.map(|part| part.to_string()).join("/")
+}
+
+pub fn parse_parts(text: &str) -> [i32; 4] {
+    let mut parts = [0; 4];
+    for (part, field) in parts.iter_mut().zip(text.split('/')) {
+        *part = field.trim().parse().unwrap_or(0);
+    }
+    parts
 }
 
 /// Worms: shown for catches saved before baits were recorded.

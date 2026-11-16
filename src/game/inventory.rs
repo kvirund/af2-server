@@ -4,11 +4,12 @@
 use anyhow::Result;
 use chrono::{Local, Months};
 
-use super::{Conn, Outcome, Player, Session, active, character, panels, perks};
+use super::{Conn, Outcome, Player, Session, active, character, crafting, panels, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BagSettings, CatalogItem};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
+use crate::world::World;
 
 /// The client's request for "any free inventory cell".
 const ANY_BAG: i32 = -1;
@@ -57,11 +58,19 @@ fn template_length(xml: &str) -> Option<f64> {
     xml[start..end].trim().parse().ok()
 }
 
+/// The piece's own description: its template's, with what it was built from
+/// and its `param` written in.
+pub fn item_xml(world: &World, item: &ItemEntry) -> String {
+    let template = world.catalog.get(item.template);
+    let xml = template.map_or("", |template| template.xml.as_str());
+    let built = crafting::built_xml(&world.settings, &world.recipes, xml, item.template, item.parts);
+    let xml = built.as_deref().unwrap_or(xml);
+    with_param(xml, item.param, param_slot(template.map_or(0, |template| template.kind))).into_owned()
+}
+
 /// The item record shared by cases 180 and 181.
 fn write_item(w: &mut AfcWriter, conn: &Conn, owner: i64, item: &ItemEntry) {
-    let template = conn.world.catalog.get(item.template);
-    let xml = template.map_or("", |template| template.xml.as_str());
-    let xml = with_param(xml, item.param, param_slot(template.map_or(0, |template| template.kind)));
+    let xml = item_xml(&conn.world, item);
     let now = Local::now().naive_local();
     let expiry = now.checked_add_months(Months::new(ITEM_EXPIRY_MONTHS)).unwrap_or(now);
 
@@ -153,7 +162,7 @@ pub fn separate_shared_cells(settings: &BagSettings, character: &mut CharacterDa
         changed += 1;
         let about = info(item.template);
         let target = &mut character.items[first];
-        if about.stacks && target.template == item.template && target.param == item.param {
+        if about.stacks && target.template == item.template && target.param == item.param && target.parts == item.parts {
             let poured = item.count.min(about.max_count - target.count).max(0);
             target.count += poured;
             character.items[index].count -= poured;
@@ -572,7 +581,7 @@ fn merge(character: &mut CharacterData, target: i64, source: i64, capacity: i32)
     let to = character.items.iter().position(|item| item.id == target)?;
     let from = character.items.iter().position(|item| item.id == source)?;
     let (into, poured) = (&character.items[to], &character.items[from]);
-    if to == from || into.template != poured.template || into.param != poured.param {
+    if to == from || into.template != poured.template || into.param != poured.param || into.parts != poured.parts {
         return None;
     }
     let moved = character.items[from].count.min(capacity - character.items[to].count).max(0);
@@ -646,6 +655,7 @@ pub struct Purchase {
     new_stacks: Vec<((i32, i32), i32)>,
     /// The `param` of the new pieces.
     param: i32,
+    parts: [i32; 4],
 }
 
 pub fn plan_purchase(
@@ -688,6 +698,7 @@ pub fn plan_pieces_of(
         for (index, held) in character.items.iter().enumerate() {
             if held.template == item.id
                 && held.param == param
+                && held.parts == [0; 4]
                 && held.bag < FIRST_NON_INVENTORY_BAG
                 && held.count < capacity
                 && left > 0
@@ -708,7 +719,23 @@ pub fn plan_pieces_of(
         new_stacks.push((place, pieces));
         left -= pieces;
     }
-    Ok(Purchase { topped, new_stacks, param })
+    Ok(Purchase { topped, new_stacks, param, parts: [0; 4] })
+}
+
+/// Room for one built thing: it never joins a stack, its parts are its own.
+pub fn plan_built(settings: &BagSettings, character: &CharacterData, item: &CatalogItem, parts: [i32; 4]) -> Result<Purchase, BuyError> {
+    if parts == [0; 4] {
+        return plan_pieces_of(settings, character, item, 1, 0);
+    }
+    let place = free_place(settings, character, item.kind, None, &[]).ok_or(BuyError::NoRoom)?;
+    Ok(Purchase { topped: Vec::new(), new_stacks: vec![(place, 1)], param: 0, parts })
+}
+
+pub async fn give_built(conn: &Conn, player: &mut Player, item: &CatalogItem, parts: [i32; 4]) -> Result<Result<Vec<ItemEntry>, BuyError>> {
+    match plan_built(&conn.world.settings.bags, &player.data, item, parts) {
+        Ok(plan) => Ok(Ok(place(conn, player, item, plan).await?)),
+        Err(error) => Ok(Err(error)),
+    }
 }
 
 /// Pays for and hands over the items, returning those that changed.
@@ -769,6 +796,7 @@ async fn place(conn: &Conn, player: &mut Player, item: &CatalogItem, purchase: P
             durability: item.durability,
             template: item.id,
             param: purchase.param,
+            parts: purchase.parts,
         };
         player.data.items.push(entry.clone());
         changed.push(entry);
@@ -785,7 +813,7 @@ mod tests {
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag: 1, cell, count: 1, durability: 1.0, template, param: 0 }
+        ItemEntry { id, bag: 1, cell, count: 1, durability: 1.0, template, param: 0, parts: [0; 4] }
     }
 
     #[test]
@@ -816,7 +844,7 @@ mod tests {
     }
 
     fn stack(id: i64, bag: i32, cell: i32, count: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell, count, durability: 1.0, template, param: 0 }
+        ItemEntry { id, bag, cell, count, durability: 1.0, template, param: 0, parts: [0; 4] }
     }
 
     #[test]
@@ -882,14 +910,14 @@ mod tests {
     fn stacks_join_an_existing_stack() {
         let character = CharacterData { money: 100, items: vec![held(1, 0, 10)], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &catalog_item(true, 1), 5);
-        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 5)], new_stacks: vec![], param: 0 }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 5)], new_stacks: vec![], param: 0, parts: [0; 4] }));
     }
 
     #[test]
     fn single_items_take_free_cells_in_order() {
         let character = CharacterData { money: 100, items: vec![held(1, 0, 99)], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &catalog_item(false, 1), 1);
-        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 1), 1)], param: 0 }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 1), 1)], param: 0, parts: [0; 4] }));
     }
 
     #[test]
@@ -897,7 +925,7 @@ mod tests {
         let item = CatalogItem { shop_count: 50, ..catalog_item(true, 1) };
         let character = CharacterData { money: 100, ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &item, 2);
-        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 0), 99), ((1, 1), 1)], param: 0 }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![], new_stacks: vec![((1, 0), 99), ((1, 1), 1)], param: 0, parts: [0; 4] }));
     }
 
     #[test]
@@ -907,7 +935,7 @@ mod tests {
         full.count = 90;
         let character = CharacterData { money: 100, items: vec![full], ..Default::default() };
         let plan = plan_purchase(&bags(), &character, &item, 1);
-        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 9)], new_stacks: vec![((1, 1), 21)], param: 0 }));
+        assert_eq!(plan, Ok(Purchase { topped: vec![(0, 9)], new_stacks: vec![((1, 1), 21)], param: 0, parts: [0; 4] }));
     }
 
     #[test]
@@ -1018,7 +1046,7 @@ mod tests {
 
     #[test]
     fn pieces_are_taken_across_carried_stacks_but_not_from_storage() {
-        let stack = |id, bag, count| ItemEntry { id, bag, cell: id as i32, count, durability: 1.0, template: 1167, param: 0 };
+        let stack = |id, bag, count| ItemEntry { id, bag, cell: id as i32, count, durability: 1.0, template: 1167, param: 0, parts: [0; 4] };
         let mut character = CharacterData { items: vec![stack(1, 1, 3), stack(2, 52, 10), stack(3, 2, 4)], ..Default::default() };
         assert_eq!(pieces_carried(&character, 1167), 7);
         assert_eq!(take_carried(&mut character, 1167, 8), None);

@@ -170,6 +170,7 @@ async fn create_character(conn: &Conn, account: i64, name: &str, appearance: Vec
             durability: item.durability,
             template: item.id,
             param: 0,
+            parts: [0; 4],
         });
     }
 

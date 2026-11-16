@@ -281,6 +281,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         id @ (msg::CRAFT | msg::CRAFT_STATION) => crafting::station(session, message, id).await,
         msg::RECIPE_LEARN => crafting::learn(session, message).await,
         msg::CRAFT_MAKE => crafting::make(session, message).await,
+        msg::CONSTRUCT => crafting::build(session, message).await,
         msg::USER_STATE => gathering::show(session).await,
         msg::HARVEST_START => gathering::start(session, message).await,
         msg::HARVEST_FINISH => gathering::finish(session, message).await,

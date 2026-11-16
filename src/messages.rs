@@ -101,6 +101,9 @@ pub const GATHER_UPDATE: i32 = 162;
 pub const HARVEST_START: i32 = 1500;
 pub const HARVEST_FINISH: i32 = 1510;
 pub const CRAFT_ERROR: i32 = 1703;
+/// C→S: «Создать» in «Конструирование»: int station, int recipe, int extra
+/// parts A, B, C, int modifiers, long the item built on (0: any). S→C: as 1702.
+pub const CONSTRUCT: i32 = 1705;
 pub const ITEMS_GAINED: i32 = 125;
 pub const LOOT: i32 = 126;
 pub const ITEM_UPDATES: i32 = 181;

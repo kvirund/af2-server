@@ -188,7 +188,7 @@ mod tests {
     }
 
     fn tokens(template: i32, count: i32) -> crate::storage::ItemEntry {
-        crate::storage::ItemEntry { id: i64::from(template), template, bag: 1, cell: 0, count, durability: 0.0, param: 0 }
+        crate::storage::ItemEntry { id: i64::from(template), template, bag: 1, cell: 0, count, durability: 0.0, param: 0, parts: [0; 4] }
     }
 
     #[test]

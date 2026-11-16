@@ -25,6 +25,10 @@ struct Recipe {
     profession: i32,
     profession_level: i32,
     ingredients: Vec<[f64; 6]>,
+    max_parts: i32,
+    components: [[f64; 3]; 4],
+    passive: [f64; 3],
+    kg_count: [f64; 3],
 }
 
 /// The fields of `a/b/c`; the game leaves unset ones out.
@@ -55,6 +59,10 @@ struct Tags {
     profession_level: Regex,
     show: Regex,
     ingredient: Regex,
+    max_parts: Regex,
+    components: [Regex; 4],
+    passive: Regex,
+    kg_count: Regex,
 }
 
 impl Tags {
@@ -70,6 +78,10 @@ impl Tags {
             profession_level: tag("profy_minlevel"),
             show: tag("showid"),
             ingredient: tag("ingr"),
+            max_parts: tag("maxres"),
+            components: [tag("componentA"), tag("componentB"), tag("componentC"), tag("componentD")],
+            passive: tag("passive"),
+            kg_count: tag("kgcount"),
         }
     }
 }
@@ -110,6 +122,10 @@ fn extract(assets: &[u8]) -> Result<Vec<Recipe>> {
                 profession: int(&tags.profession, body),
                 profession_level: int(&tags.profession_level, body),
                 ingredients: tags.ingredient.captures_iter(body).map(|one| numbers(&one[1])).collect(),
+                max_parts: int(&tags.max_parts, body),
+                components: tags.components.each_ref().map(|tag| numbers(found(tag, body))),
+                passive: numbers(found(&tags.passive, body)),
+                kg_count: numbers(found(&tags.kg_count, body)),
             });
         }
     }
@@ -117,7 +133,7 @@ fn extract(assets: &[u8]) -> Result<Vec<Recipe>> {
 }
 
 /// A file without this field was made by an older version and is made again.
-const CURRENT_FIELD: &str = "\"crit_chance\"";
+const CURRENT_FIELD: &str = "\"max_parts\"";
 
 /// Does nothing once the file exists: it only depends on the installed game.
 pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
@@ -147,7 +163,13 @@ mod tests {
             <ingredients><ingr>1035/1/0</ingr><ingr>0/2/1/300/3000</ingr></ingredients>
             <craft_time>5</craft_time><craft_cost>1/0/5</craft_cost>
             <result_id_krit>1012/30/0</result_id_krit><krit_shance>10</krit_shance>
-        </recept></stanok><stanok id="1000">
+        </recept></stanok><stanok id="4">
+        <recept id="486" category="510" type="1"><result_id>1335/1/0</result_id><maxres>12</maxres>
+            <componentA>1153/1/0.3</componentA> # comment <componentB>1154/1/0.2</componentB>
+            <!--<componentD>1086/2/10</componentD>--><passive>1334/1/0</passive>
+            <craft_cost>2700/0/500</craft_cost></recept>
+        <recept id="315" category="150"><result_id>1257/1/0</result_id><kgcount>1000/3500/0</kgcount></recept>
+        </stanok><stanok id="1000">
         <recept id="7" category="50" type="1"><isDefault>1</isDefault><showid>3</showid>
             <result_id>1/1/0</result_id><craft_cost>0/0/0</craft_cost></recept>
         </stanok></craft>junk"#;
@@ -155,7 +177,7 @@ mod tests {
     #[test]
     fn extracts_every_field() {
         let recipes = extract(ASSETS).unwrap();
-        assert_eq!(recipes.len(), 2);
+        assert_eq!(recipes.len(), 4);
         assert_eq!(recipes[0], Recipe {
             id: 142,
             station: 3,
@@ -171,13 +193,27 @@ mod tests {
             profession: 0,
             profession_level: 0,
             ingredients: vec![[1035.0, 1.0, 0.0, 0.0, 0.0, 0.0], [0.0, 2.0, 1.0, 300.0, 3000.0, 0.0]],
+            max_parts: 0,
+            components: [[0.0; 3]; 4],
+            passive: [0.0; 3],
+            kg_count: [0.0; 3],
         });
+    }
+
+    #[test]
+    fn extracts_the_constructor_and_the_weight_count() {
+        let recipes = extract(ASSETS).unwrap();
+        let built = &recipes[1];
+        assert_eq!((built.id, built.kind, built.max_parts), (486, 1, 12));
+        assert_eq!(built.components, [[1153.0, 1.0, 0.3], [1154.0, 1.0, 0.2], [0.0; 3], [0.0; 3]]);
+        assert_eq!(built.passive, [1334.0, 1.0, 0.0]);
+        assert_eq!(recipes[2].kg_count, [1000.0, 3500.0, 0.0]);
     }
 
     #[test]
     fn reads_the_optional_marks() {
         let recipes = extract(ASSETS).unwrap();
-        assert_eq!((recipes[1].station, recipes[1].show, recipes[1].kind, recipes[1].default), (1000, 3, 1, true));
+        assert_eq!((recipes[3].station, recipes[3].show, recipes[3].kind, recipes[3].default), (1000, 3, 1, true));
     }
 
     #[test]

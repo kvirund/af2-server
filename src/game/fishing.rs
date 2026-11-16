@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Settings, Species, TraitSettings};
+use crate::config::{FishTable, FishingSettings, ProgressionSettings, Settings, Species, TraitSettings};
 use crate::storage::CharacterData;
 use crate::world::World;
 use crate::messages as msg;
@@ -168,15 +168,21 @@ fn test_kg(xml: &str) -> Option<f64> {
 
 /// The heaviest fish the rod's tackle holds: the weakest of its rod, reel and
 /// line tests times the factor. The bait tells which rod's bag to look in.
-fn tackle_limit(catalog: &Catalog, items: &[ItemEntry], bait_item: i64, factor: f64) -> f64 {
+/// `test_of` reads a piece's test from its own description.
+fn tackle_limit(test_of: &dyn Fn(&ItemEntry) -> Option<f64>, items: &[ItemEntry], bait_item: i64, factor: f64) -> f64 {
     let Some(bag) = items.iter().find(|item| item.id == bait_item).map(|item| item.bag) else {
         return f64::INFINITY;
     };
-    tackle_limit_in(catalog, items, bag, factor)
+    tackle_limit_in(test_of, items, bag, factor)
+}
+
+/// A piece's test, from its description as the client sees it.
+pub(super) fn test_of(world: &World, item: &ItemEntry) -> Option<f64> {
+    test_kg(&inventory::item_xml(world, item))
 }
 
 /// The same for the rod in this bag.
-pub(super) fn tackle_limit_in(catalog: &Catalog, items: &[ItemEntry], bag: i32, factor: f64) -> f64 {
+pub(super) fn tackle_limit_in(test_of: &dyn Fn(&ItemEntry) -> Option<f64>, items: &[ItemEntry], bag: i32, factor: f64) -> f64 {
     if factor <= 0.0 {
         return f64::INFINITY;
     }
@@ -185,7 +191,7 @@ pub(super) fn tackle_limit_in(catalog: &Catalog, items: &[ItemEntry], bag: i32, 
         let strongest = items
             .iter()
             .filter(|item| item.bag == bag && item.cell == cell)
-            .filter_map(|item| catalog.get(item.template).and_then(|found| test_kg(&found.xml)))
+            .filter_map(test_of)
             .filter(|test| *test > 0.0)
             .fold(None, |best: Option<f64>, test| Some(best.map_or(test, |best| best.max(test))));
         if let Some(test) = strongest {
@@ -302,7 +308,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         conn.send(msg::BITE, w.finish()).await?;
         return Ok(Outcome::Answered);
     }
-    let max_grams = tackle_limit(&world.catalog, &player.data.items, bait_id, settings.tackle_weight_factor);
+    let max_grams = tackle_limit(&|item| test_of(world, item), &player.data.items, bait_id, settings.tackle_weight_factor);
     let base = travel::current_base(&world.settings, player);
     let cast = Cast { base, location: player.location, bait, max_grams, depth, bottom, night: is_night(settings) };
     player.casts.insert(player.location, LastCast { depth, bottom, bait: bait.unwrap_or(0), at: chrono::Utc::now().timestamp() });
@@ -473,6 +479,7 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Catalog;
     #[test]
     fn a_lure_says_its_kind_in_the_sub_type() {
         assert_eq!(subtype("<base><wtype>12</wtype><subType>6</subType></base>"), Some(6));
@@ -614,18 +621,19 @@ mod tests {
     }
 
     fn held(id: i64, bag: i32, cell: i32, template: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell, count: 1, durability: 1.0, template, param: 0 }
+        ItemEntry { id, bag, cell, count: 1, durability: 1.0, template, param: 0, parts: [0; 4] }
     }
 
     #[test]
     fn the_weakest_part_of_the_tackle_limits_the_fish() {
         let catalog = Catalog::new(vec![gear(1, "1.5/2.2/150"), gear(2, "1/0/1"), gear(3, "2/0.15/30"), gear(4, "100/1/0"), gear(5, "6/0/5")]);
+        let test = |item: &ItemEntry| catalog.get(item.template).and_then(|found| test_kg(&found.xml));
         let mut items = vec![held(10, 100, 1, 1), held(11, 100, 2, 2), held(12, 100, 3, 3), held(13, 100, 20, 4)];
-        assert_eq!(tackle_limit(&catalog, &items, 13, 1.5), 1500.0);
-        assert_eq!(tackle_limit(&catalog, &items, 13, 0.0), f64::INFINITY);
-        assert_eq!(tackle_limit(&catalog, &items, 99, 1.5), f64::INFINITY);
+        assert_eq!(tackle_limit(&test, &items, 13, 1.5), 1500.0);
+        assert_eq!(tackle_limit(&test, &items, 13, 0.0), f64::INFINITY);
+        assert_eq!(tackle_limit(&test, &items, 99, 1.5), f64::INFINITY);
         items[1].template = 5;
-        assert_eq!(tackle_limit(&catalog, &items, 13, 1.5), 2250.0);
+        assert_eq!(tackle_limit(&test, &items, 13, 1.5), 2250.0);
     }
 
     #[test]

@@ -6,16 +6,25 @@ use rand::random;
 
 use std::collections::HashMap;
 
-use super::{Outcome, Session, active, character, inventory, keepnet, perks, quests, titles, vitals};
+use super::{Conn, Outcome, Player, Session, active, character, inventory, keepnet, perks, quests, titles, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{CatalogItem, Recipe};
+use crate::config::{CatalogItem, Recipe, Settings, SkillTree};
 use crate::messages as msg;
 use crate::storage::{CaughtFish, CharacterData, ItemEntry};
 
 const RECIPE_KIND: i32 = 28;
-/// The kind of `<recept>` the client lists with the fields of `row`. The other
-/// one, assembled from parts, needs the constructor.
+/// The kind of `<recept>` the client lists with the fields of `row`.
 const SIMPLE_RECIPE: i32 = 0;
+/// Built from parts in «Конструирование» (`built_row`, case 1705).
+const BUILT_RECIPE: i32 = 1;
+/// «Механик»: its `val` per level, in percent, on what the parts give a class
+/// A thing (item `category` 1).
+const MECHANIC: i32 = 150;
+const CLASS_A: i32 = 1;
+/// The client's preview of a built thing: each extra part asks this many
+/// levels more and adds this share of the weight.
+const LEVEL_PER_PART: f64 = 0.3;
+const WEIGHT_PER_PART: f64 = 0.1;
 /// Item-kind ingredients; the other value means a fish of a given weight.
 const ITEM_INGREDIENT: f64 = 0.0;
 /// Bags below this are the inventory pages; the client counts only those.
@@ -71,12 +80,16 @@ fn at_station(recipe: &Recipe, station: i32) -> bool {
 /// int uses left, cost (money, 0, work points), int seconds, int category, int
 /// profession, int its level, int ingredient count, and for each three doubles
 /// and three ints. The first number of each triple is an item id.
+fn triple(w: &mut AfcWriter, values: &[f64]) {
+    for value in values {
+        w.double(*value);
+    }
+}
+
 fn write_row(w: &mut AfcWriter, recipe: &Recipe, station: i32, uses: i32) {
-    let triple = |w: &mut AfcWriter, values: &[f64]| {
-        for value in values {
-            w.double(*value);
-        }
-    };
+    if recipe.kind == BUILT_RECIPE {
+        return built_row(w, recipe, station, uses);
+    }
     w.int32(recipe.id).int32(station).int32(SIMPLE_RECIPE);
     triple(w, &recipe.result);
     w.int32(uses);
@@ -91,6 +104,25 @@ fn write_row(w: &mut AfcWriter, recipe: &Recipe, station: i32, uses: i32) {
     }
 }
 
+/// A «Конструирование» entry (`CLFFOBKFKDN.OAKCFGOLKLA`): int recipe, int
+/// station, int 1, result, int uses, cost, int seconds, category, profession,
+/// its level, int extra parts at most, components A–D, the thing built on,
+/// float the quality chance, its modifier. Every triple is three doubles.
+fn built_row(w: &mut AfcWriter, recipe: &Recipe, station: i32, uses: i32) {
+    w.int32(recipe.id).int32(station).int32(BUILT_RECIPE);
+    triple(w, &recipe.result);
+    w.int32(uses);
+    triple(w, &recipe.cost);
+    w.int32(recipe.time).int32(recipe.category).int32(recipe.profession).int32(recipe.profession_level);
+    w.int32(recipe.max_parts);
+    for component in &recipe.components {
+        triple(w, component);
+    }
+    triple(w, &recipe.passive);
+    w.single(recipe.crit_chance as f32);
+    triple(w, &recipe.crit_result);
+}
+
 pub async fn station(session: &mut Session, message: &AfcMessage, id: i32) -> Result<Outcome> {
     let mut r = message.reader();
     if id == msg::CRAFT {
@@ -102,9 +134,14 @@ pub async fn station(session: &mut Session, message: &AfcMessage, id: i32) -> Re
     let world = &session.conn.world;
     let exists = |item: i32| world.catalog.get(item).is_some();
     let drawable = |recipe: &&Recipe| {
-        recipe.kind == SIMPLE_RECIPE
-            && exists(recipe.result[0] as i32)
-            && recipe.ingredients.iter().all(|one| one[2] != ITEM_INGREDIENT || exists(one[0] as i32))
+        let parts = || recipe.components.iter().chain([&recipe.passive]).all(|part| part[0] == 0.0 || exists(part[0] as i32));
+        let ingredients = || recipe.ingredients.iter().all(|one| one[2] != ITEM_INGREDIENT || exists(one[0] as i32));
+        exists(recipe.result[0] as i32)
+            && match recipe.kind {
+                SIMPLE_RECIPE => ingredients(),
+                BUILT_RECIPE => parts(),
+                _ => false,
+            }
     };
 
     let mut w = AfcWriter::new();
@@ -191,20 +228,7 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) 
         if ingredient[2] == ITEM_INGREDIENT {
             // Every other item ingredient leaves its fourth number at 0.
             let param = if id == FISH_CARD { ingredient[3] as i32 } else { 0 };
-            let mut left = need;
-            let matching = |item: &&ItemEntry| item.template == id && item.param == param && item.bag < FIRST_NON_INVENTORY_BAG;
-            for item in character.items.iter().filter(matching) {
-                let already = taken.items.iter().filter(|(held, _)| *held == item.id).map(|(_, n)| n).sum::<i32>();
-                let part = left.min(item.count - already);
-                if part > 0 {
-                    taken.items.push((item.id, part));
-                    left -= part;
-                }
-                if left == 0 {
-                    break;
-                }
-            }
-            if left > 0 {
+            if !take_items(character, |item| item.template == id && item.param == param, need, &mut taken) {
                 return None;
             }
         } else {
@@ -225,6 +249,133 @@ fn ingredients_for(character: &CharacterData, recipe: &Recipe, mutants: &[i32]) 
         }
     }
     Some(taken)
+}
+
+/// Pieces from the inventory pages (the client counts only those), adding up
+/// across stacks. False if there are not enough.
+fn take_items(character: &CharacterData, matching: impl Fn(&ItemEntry) -> bool, need: i32, taken: &mut Taken) -> bool {
+    let mut left = need;
+    for item in character.items.iter().filter(|item| item.bag < FIRST_NON_INVENTORY_BAG && matching(item)) {
+        let already = taken.items.iter().filter(|(held, _)| *held == item.id).map(|(_, n)| n).sum::<i32>();
+        let part = left.min(item.count - already);
+        if part > 0 {
+            taken.items.push((item.id, part));
+            left -= part;
+        }
+        if left == 0 {
+            break;
+        }
+    }
+    left == 0
+}
+
+/// What a «Конструирование» build takes: each component's least pieces and
+/// the extras chosen, and the thing built on. `chosen` is that thing's id; the
+/// client sends 0 for any, and does so for every build after the first in
+/// «Создать всё».
+fn parts_for(character: &CharacterData, recipe: &Recipe, extras: [i32; 3], chosen: i64) -> Option<Taken> {
+    if extras.iter().any(|extra| *extra < 0) || extras.iter().sum::<i32>() > recipe.max_parts {
+        return None;
+    }
+    let mut taken = Taken::default();
+    for (component, extra) in recipe.components.iter().zip(extras) {
+        let template = component[0] as i32;
+        if template == 0 {
+            if extra != 0 {
+                return None;
+            }
+            continue;
+        }
+        let need = component[1].max(1.0) as i32 + extra;
+        if !take_items(character, |item| item.template == template && item.param == 0, need, &mut taken) {
+            return None;
+        }
+    }
+    let base = recipe.passive[0] as i32;
+    if base > 0 {
+        let need = recipe.passive[1].max(1.0) as i32;
+        let fits = |item: &ItemEntry| item.template == base && (chosen == 0 || item.id == chosen);
+        if !take_items(character, fits, need, &mut taken) {
+            return None;
+        }
+    }
+    Some(taken)
+}
+
+/// `kgcount`: a fish this heavy or more gives a piece for every so many grams,
+/// never fewer than the recipe's own count. The client data says only «the
+/// count from the weight of the ingredients: least weight, weight per piece».
+fn by_weight(kg_count: &[f64; 3], count: i32, grams: i64) -> i32 {
+    let (least, per_piece) = (kg_count[0], kg_count[1]);
+    if per_piece <= 0.0 || (grams as f64) < least {
+        return count;
+    }
+    count.max((grams as f64 / per_piece).floor() as i32)
+}
+
+fn number(value: f64) -> String {
+    format!("{}", (value * 1000.0).round() / 1000.0)
+}
+
+/// The text between `<tag>` and `</tag>`.
+fn tag_span(xml: &str, tag: &str) -> Option<(usize, usize)> {
+    let open = format!("<{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = start + xml[start..].find('<')?;
+    Some((start, end))
+}
+
+/// A built thing's description. Each extra part of a component adds its
+/// factor to the matching number of `basePar` (A the 1st, B the 2nd, C the
+/// 3rd, as the recipes' comments say); «Механик» adds its percent to those
+/// numbers on a class A thing; the level asked and the weight grow as in the
+/// client's own preview. `None` when nothing was added.
+pub fn built_xml(settings: &Settings, recipes: &[Recipe], xml: &str, template: i32, parts: [i32; 4]) -> Option<String> {
+    built_xml_with(&settings.skill_tree, recipes, xml, template, parts)
+}
+
+fn built_xml_with(skills: &SkillTree, recipes: &[Recipe], xml: &str, template: i32, parts: [i32; 4]) -> Option<String> {
+    if parts == [0; 4] {
+        return None;
+    }
+    let recipe = recipes.iter().find(|one| one.kind == BUILT_RECIPE && one.result[0] as i32 == template)?;
+    let mut xml = xml.to_owned();
+    let class_a = tag_span(&xml, "category").is_some_and(|(start, end)| xml[start..end].trim().parse() == Ok(CLASS_A));
+    let mechanic = if class_a {
+        f64::from(parts[3]) * skills.get(MECHANIC).map_or(0.0, |node| node.effect[0]) / 100.0
+    } else {
+        0.0
+    };
+
+    if let Some((start, end)) = tag_span(&xml, "basePar") {
+        let mut values: Vec<f64> = xml[start..end].split('/').map(|field| field.trim().parse().unwrap_or(0.0)).collect();
+        for (slot, (component, extra)) in recipe.components.iter().zip(parts).take(3).enumerate() {
+            if component[0] == 0.0 || slot >= values.len() {
+                continue;
+            }
+            values[slot] = (values[slot] + component[2] * f64::from(extra)) * (1.0 + mechanic);
+        }
+        let text: Vec<String> = values.iter().map(|value| number(*value)).collect();
+        xml.replace_range(start..end, &text.join("/"));
+    }
+    let extras = f64::from(parts[0] + parts[1] + parts[2]);
+    if let Some((start, end)) = tag_span(&xml, "minimalLevel") {
+        let level: i32 = xml[start..end].trim().parse().unwrap_or(0);
+        xml.replace_range(start..end, &(level + (LEVEL_PER_PART * extras) as i32).to_string());
+    }
+    if let Some((start, end)) = tag_span(&xml, "weight") {
+        let weight: f64 = xml[start..end].trim().parse().unwrap_or(0.0);
+        xml.replace_range(start..end, &((weight * (1.0 + WEIGHT_PER_PART * extras)).round()).to_string());
+    }
+    Some(xml)
+}
+
+/// Money and work points a recipe asks, «Опыт ремесла» taken off the points.
+fn price(conn: &Conn, player: &Player, recipe: &Recipe) -> (i64, f32) {
+    let per_level = conn.world.settings.skill_tree.get(CRAFT_EXPERIENCE).map_or(0.0, |node| node.effect[0]);
+    let off = per_level * f64::from(perks::level_of(conn, player, CRAFT_EXPERIENCE));
+    let work = (f64::from(recipe.cost[2] as f32) * (1.0 - off / 100.0)).max(0.0) as f32;
+    (recipe.cost[0] as i64, work)
 }
 
 async fn refuse(session: &Session, reason: &str, recipe: i32) -> Result<Outcome> {
@@ -261,7 +412,7 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let points = player.data.vitals.as_ref().map_or(0.0, |vitals| vitals.work_points);
     let critical = recipe.crit_result[0] > 0.0 && random::<f64>() * 100.0 < crit_chance;
     let made = if critical { recipe.crit_result } else { recipe.result };
-    let (template, count) = (made[0] as i32, made[1].max(1.0) as i32);
+    let template = made[0] as i32;
 
     let problem = if uses == 0 {
         Some("no_user_recept")
@@ -278,6 +429,8 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let Some(taken) = ingredients_for(&player.data, recipe, &world.settings.fishing.mutant_species) else {
         return refuse(session, "no_ingridients", recipe_id).await;
     };
+    let grams: i64 = player.data.fish.iter().filter(|fish| taken.fish.contains(&fish.id)).map(|fish| i64::from(fish.grams)).sum();
+    let count = by_weight(&recipe.kg_count, made[1].max(1.0) as i32, grams);
     let Some(item) = world.catalog.get(template) else {
         return refuse(session, "no_recept", recipe_id).await;
     };
@@ -335,6 +488,85 @@ pub async fn make(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     Ok(Outcome::Answered)
 }
 
+/// Case 1705, once the progress bar is full. The reply has the fields of 1702.
+pub async fn build(session: &mut Session, message: &AfcMessage) -> Result<Outcome> {
+    let mut r = message.reader();
+    let (_station, recipe_id) = (r.int32()?, r.int32()?);
+    let extras = [r.int32()?, r.int32()?, r.int32()?];
+    let _modifiers = r.int32()?;
+    let chosen = r.int64()?;
+    let world = session.conn.world.clone();
+
+    let Some(recipe) = world.recipes.iter().find(|one| one.id == recipe_id && one.kind == BUILT_RECIPE) else {
+        return refuse(session, "no_recept", recipe_id).await;
+    };
+    let player = active(&mut session.player)?;
+    let uses = if recipe.default { UNLIMITED } else { player.data.known_recipes.get(&recipe.id).copied().unwrap_or(0) };
+    let (money, work) = price(&session.conn, player, recipe);
+    let points = player.data.vitals.as_ref().map_or(0.0, |vitals| vitals.work_points);
+    let problem = if uses == 0 {
+        Some("no_user_recept")
+    } else if player.data.money < money {
+        Some("no_money")
+    } else if points < work {
+        Some("no_workpoint")
+    } else {
+        None
+    };
+    if let Some(reason) = problem {
+        return refuse(session, reason, recipe_id).await;
+    }
+    let Some(taken) = parts_for(&player.data, recipe, extras, chosen) else {
+        return refuse(session, "no_ingridients", recipe_id).await;
+    };
+    let template = recipe.result[0] as i32;
+    let Some(item) = world.catalog.get(template) else {
+        return refuse(session, "no_recept", recipe_id).await;
+    };
+    let mechanic = perks::level_of(&session.conn, player, MECHANIC);
+    let parts = [extras[0], extras[1], extras[2], mechanic];
+    if inventory::plan_built(&world.settings.bags, &player.data, item, parts).is_err() {
+        return refuse(session, "no_inventory", recipe_id).await;
+    }
+
+    let conn = &session.conn;
+    let mut changed = Vec::new();
+    for (id, pieces) in &taken.items {
+        match inventory::take_pieces(&mut player.data, *id, *pieces) {
+            Some(Ok(item)) => changed.push(item),
+            Some(Err(gone)) => inventory::send_removed(conn, gone).await?,
+            None => {}
+        }
+    }
+    player.data.money -= money;
+    if let Some(vitals) = player.data.vitals.as_mut() {
+        vitals.work_points -= work;
+    }
+    if uses > 0 {
+        player.data.known_recipes.insert(recipe.id, uses - 1);
+    }
+    if let Ok(gained) = inventory::give_built(conn, player, item, parts).await? {
+        changed.extend(gained);
+    }
+    titles::count(player, "craft", 1);
+    conn.save(player).await?;
+
+    inventory::send_updates(conn, player.data.id, &changed).await?;
+    if money > 0 {
+        character::send_money(conn, player, -money).await?;
+    }
+    vitals::send(conn, player).await?;
+    let mut w = AfcWriter::new();
+    w.int32(template).int32(1).int32(0);
+    conn.send(msg::ITEMS_GAINED, w.finish()).await?;
+    let mut w = AfcWriter::new();
+    w.int32(template).int32(1).boolean(false);
+    conn.send(msg::CONSTRUCT, w.finish()).await?;
+    conn.log(&format!("   -> 1705 built {template} from recipe {recipe_id}: parts {parts:?}, used {} stacks", taken.items.len()));
+    quests::item_made(conn, player, template, 1).await?;
+    Ok(Outcome::Answered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,7 +577,7 @@ mod tests {
     }
 
     fn held(id: i64, template: i32, count: i32, bag: i32) -> ItemEntry {
-        ItemEntry { id, bag, cell: 0, count, durability: 1.0, template, param: 0 }
+        ItemEntry { id, bag, cell: 0, count, durability: 1.0, template, param: 0, parts: [0; 4] }
     }
 
     fn needing(ingredients: Vec<[f64; 6]>) -> Recipe {
@@ -424,6 +656,10 @@ mod tests {
             profession: 0,
             profession_level: 0,
             ingredients: vec![[1035.0, 1.0, 0.0, 0.0, 0.0, 0.0]],
+            max_parts: 0,
+            components: [[0.0; 3]; 4],
+            passive: [0.0; 3],
+            kg_count: [0.0; 3],
         }
     }
 
@@ -476,6 +712,67 @@ mod tests {
         assert!(at_station(&recipe(3, 0), 3));
         assert!(!at_station(&recipe(COLLECTIONS, 3), 3));
         assert!(at_station(&recipe(COLLECTIONS, 3), COLLECTIONS));
+    }
+
+    fn rod_kit() -> Recipe {
+        Recipe {
+            id: 1000,
+            station: 4,
+            kind: BUILT_RECIPE,
+            result: [1152.0, 1.0, 0.0],
+            max_parts: 12,
+            components: [[1153.0, 1.0, 0.4], [1154.0, 1.0, 0.3], [1155.0, 1.0, 25.0], [0.0; 3]],
+            passive: [1002.0, 1.0, 0.0],
+            ingredients: Vec::new(),
+            ..recipe(4, 0)
+        }
+    }
+
+    #[test]
+    fn a_built_row_has_the_size_the_client_reads() {
+        let mut w = AfcWriter::new();
+        write_row(&mut w, &rod_kit(), 4, -1);
+        assert_eq!(w.finish().len(), 12 + 24 + 4 + 24 + 20 + 4 * 24 + 24 + 4 + 24);
+    }
+
+    #[test]
+    fn a_build_takes_the_least_parts_the_extras_and_the_rod_built_on() {
+        let character = CharacterData {
+            items: vec![held(1, 1153, 5, 5), held(2, 1154, 2, 5), held(3, 1155, 1, 5), held(4, 1002, 1, 1), held(5, 1002, 1, 1)],
+            ..Default::default()
+        };
+        let taken = parts_for(&character, &rod_kit(), [3, 1, 0], 5).unwrap();
+        assert_eq!(taken.items, vec![(1, 4), (2, 2), (3, 1), (5, 1)]);
+        assert_eq!(parts_for(&character, &rod_kit(), [3, 1, 0], 0).unwrap().items[3], (4, 1));
+        assert_eq!(parts_for(&character, &rod_kit(), [3, 2, 0], 0), None, "no third «Колено»");
+        assert_eq!(parts_for(&character, &rod_kit(), [13, 0, 0], 0), None, "more than maxres");
+        assert_eq!(parts_for(&character, &rod_kit(), [-1, 0, 0], 0), None);
+        let line = Recipe { components: [[1272.0, 1.0, 0.4], [0.0; 3], [1273.0, 1.0, 4.0], [0.0; 3]], ..rod_kit() };
+        assert_eq!(parts_for(&character, &line, [0, 1, 0], 0), None, "no component B to add to");
+    }
+
+    #[test]
+    fn the_parts_raise_the_numbers_the_level_and_the_weight() {
+        let xml = "<base><category>1</category><basePar>2.5/2.5/150</basePar><weight>1340</weight><minimalLevel>2</minimalLevel></base>";
+        let settings_free = |parts| {
+            let recipes = [rod_kit()];
+            let catalog_free = crate::config::SkillTree::new(Vec::new());
+            built_xml_with(&catalog_free, &recipes, xml, 1152, parts)
+        };
+        assert_eq!(settings_free([0; 4]), None);
+        let built = settings_free([5, 0, 2, 0]).unwrap();
+        assert!(built.contains("<basePar>4.5/2.5/200</basePar>"), "{built}");
+        assert!(built.contains("<minimalLevel>4</minimalLevel>"), "{built}");
+        assert!(built.contains("<weight>2278</weight>"), "{built}");
+    }
+
+    #[test]
+    fn heavier_fish_give_more_pieces() {
+        assert_eq!(by_weight(&[1000.0, 3500.0, 0.0], 1, 7200), 2);
+        assert_eq!(by_weight(&[1000.0, 3500.0, 0.0], 1, 900), 1);
+        assert_eq!(by_weight(&[100.0, 200.0, 0.0], 2, 451), 2);
+        assert_eq!(by_weight(&[100.0, 200.0, 0.0], 2, 1000), 5);
+        assert_eq!(by_weight(&[0.0; 3], 3, 5000), 3);
     }
 
     #[test]

@@ -1148,6 +1148,19 @@ pub struct Recipe {
     pub profession: i32,
     pub profession_level: i32,
     pub ingredients: Vec<[f64; 6]>,
+    /// «Конструирование» (kind 1): extra parts all components take together.
+    #[serde(default)]
+    pub max_parts: i32,
+    /// `componentA`–`D`: part, pieces at least, what each piece more adds to
+    /// the 1st, 2nd and 3rd numbers of the result's `basePar` (D: unused).
+    #[serde(default)]
+    pub components: [[f64; 3]; 4],
+    /// The thing the constructor builds on, used up: item, pieces.
+    #[serde(default)]
+    pub passive: [f64; 3],
+    /// `kgcount`: fish weight at least, then grams of fish per piece made.
+    #[serde(default)]
+    pub kg_count: [f64; 3],
 }
 
 pub struct GameData {
