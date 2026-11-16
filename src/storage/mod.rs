@@ -208,6 +208,9 @@ pub trait Storage: Send + Sync {
 
     async fn list_characters(&self, account: i64) -> Result<Vec<CharacterSummary>>;
 
+    /// Every character of every account, for the web pages.
+    async fn all_characters(&self) -> Result<Vec<CharacterSummary>>;
+
     /// Whether any character, on any account, has this name (case ignored).
     async fn name_taken(&self, name: &str) -> Result<bool>;
 

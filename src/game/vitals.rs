@@ -183,6 +183,15 @@ pub async fn tick(session: &mut Session) -> Result<()> {
         resting: player.last_active.elapsed().as_secs_f32() >= settings.vitals.rest_after_seconds,
     };
     show_environment(conn, player, levels).await?;
+    conn.world.publish(crate::world::LiveCharacter {
+        data: player.data.clone(),
+        connection: conn.number,
+        base: travel::current_base(settings, player),
+        location: player.location,
+        entered_at: player.entered_at,
+        dead: player.dead,
+        casts: player.casts.clone(),
+    });
     let limits = limits(settings, &conn.world.catalog, &player.data);
     if let Some(vitals) = player.data.vitals.as_mut() {
         advance(&settings.vitals, &limits, vitals, &passing);

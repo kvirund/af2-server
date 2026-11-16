@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AF2 server</title>
+<style>
+  :root { --bg: #f6f6f3; --panel: #ffffff; --text: #1d1f1c; --muted: #6b6f68; --line: #dcdcd5; --accent: #2f6b4f; --bad: #a33b2b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161816; --panel: #1f221f; --text: #e6e7e2; --muted: #9a9e96; --line: #343832; --accent: #7cc49d; --bad: #e0806f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+  header { display: flex; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 16px 10px 0; }
+  header button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 4px 10px 10px; font: inherit; cursor: pointer; }
+  header button.on { color: var(--text); border-color: var(--accent); }
+  main { padding: 16px; max-width: 1300px; }
+  section { display: none; }
+  section.on { display: block; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
+  label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 12px; }
+  select, input { font: inherit; padding: 4px 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
+  .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.species { white-space: normal; min-width: 260px; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  .muted { color: var(--muted); }
+  .dead { color: var(--bad); }
+  .empty { padding: 16px; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Atom Fishing 2</h1>
+  <button data-tab="online" class="on">В игре</button>
+  <button data-tab="characters">Персонажи</button>
+  <button data-tab="advisor">Советник</button>
+</header>
+<main>
+  <section id="online" class="on"><div class="wrap" id="online-table"></div></section>
+  <section id="characters"><div class="wrap" id="characters-table"></div></section>
+  <section id="advisor">
+    <div class="controls">
+      <label>Персонаж <select id="who"></select></label>
+      <label>База <select id="base"></select></label>
+      <label>Время <select id="night"><option value="">сейчас</option><option value="0">день</option><option value="1">ночь</option></select></label>
+      <label>Сортировать <select id="sort">
+        <option value="moneyPerRequest">деньги за запрос</option>
+        <option value="money">деньги за поклёвку</option>
+        <option value="experiencePerRequest">опыт за запрос</option>
+        <option value="experience">опыт за поклёвку</option>
+        <option value="chance">клёв</option>
+        <option value="trophies">трофеи</option>
+        <option value="species">выбранный вид</option>
+      </select></label>
+      <label>Вид <select id="species"><option value="">любой</option></select></label>
+    </div>
+    <div class="wrap" id="advisor-table"></div>
+    <p class="note" id="advisor-note"></p>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const time = (seconds) => {
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+};
+const money = (value) => value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const percent = (value) => (value * 100).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + '%';
+const round = (value) => Math.round(value).toLocaleString('ru-RU');
+const table = (head, rows, empty) => rows.length
+  ? `<table><thead><tr>${head.map(([title, cls]) => `<th class="${cls || ''}">${title}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`
+  : `<div class="empty">${empty}</div>`;
+const get = async (url) => { const reply = await fetch(url); if (!reply.ok) throw new Error(await reply.text()); return reply.json(); };
+
+let tab = 'online';
+document.querySelectorAll('header button').forEach((button) => button.addEventListener('click', () => {
+  tab = button.dataset.tab;
+  document.querySelectorAll('header button').forEach((other) => other.classList.toggle('on', other === button));
+  document.querySelectorAll('section').forEach((section) => section.classList.toggle('on', section.id === tab));
+  refresh();
+}));
+
+async function showOnline() {
+  const rows = await get('/api/online');
+  $('online-table').innerHTML = table(
+    [['Персонаж'], ['Ур.', 'num'], ['Где'], ['В этот раз', 'num'], ['Всего в игре', 'num'], ['Деньги', 'num'], ['В садке', 'num'], ['Последние забросы']],
+    rows.map((row) => `<tr><td>${esc(row.name)}${row.dead ? ' <span class="dead">мёртв</span>' : ''}</td>
+      <td class="num">${row.level}</td><td>${esc(row.baseName)}, ${esc(row.locationName)}</td>
+      <td class="num">${time(row.sessionSeconds)}</td><td class="num">${time(row.playedSeconds)}</td>
+      <td class="num">${money(row.money)}</td><td class="num">${row.keepnet}</td>
+      <td class="species">${row.casts.map((cast) => `${esc(cast.locationName)}: ${esc(cast.baitName)}, ${round(cast.depth)} / ${round(cast.bottom)} см`).join('<br>') || '—'}</td></tr>`),
+    'Сейчас в игре никого нет.');
+}
+
+let known = [];
+async function showCharacters() {
+  known = await get('/api/characters');
+  $('characters-table').innerHTML = table(
+    [['Персонаж'], ['Ур.', 'num'], ['Опыт', 'num'], ['Деньги', 'num'], ['Эрги', 'num'], ['VIP'], ['Всего в игре', 'num'], ['В садке', 'num'], ['Рекордов', 'num'], ['']],
+    known.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.level}</td><td class="num">${round(row.experience)}</td>
+      <td class="num">${money(row.money)}</td><td class="num">${row.premium}</td><td>${row.vip ? 'да' : ''}</td>
+      <td class="num">${time(row.playedSeconds)}</td><td class="num">${row.keepnet}</td><td class="num">${row.records}</td>
+      <td class="muted">${row.online ? 'в игре' : ''}</td></tr>`),
+    'Персонажей нет.');
+}
+
+let advice = null;
+async function showAdvisor() {
+  if (!known.length) known = await get('/api/characters');
+  const who = $('who');
+  if (who.options.length !== known.length) {
+    const was = who.value;
+    who.innerHTML = known.map((row) => `<option value="${row.id}">${esc(row.name)}${row.online ? ' (в игре)' : ''}</option>`).join('');
+    if (was) who.value = was;
+  }
+  if (!who.value) { $('advisor-table').innerHTML = '<div class="empty">Персонажей нет.</div>'; return; }
+  const base = $('base').value, night = $('night').value;
+  advice = await get(`/api/advisor?character=${who.value}${base ? `&base=${base}` : ''}${night ? `&night=${night}` : ''}`);
+  const bases = $('base');
+  if (bases.options.length !== advice.bases.length) bases.innerHTML = advice.bases.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
+  bases.value = advice.base;
+  const species = $('species'), chosen = species.value;
+  const names = [...new Map(advice.rows.flatMap((row) => row.species.map((one) => [one.id, one.name]))).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  species.innerHTML = '<option value="">любой</option>' + names.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
+  if (names.some(([id]) => String(id) === chosen)) species.value = chosen;
+  drawAdvice();
+}
+
+function drawAdvice() {
+  if (!advice) return;
+  const sort = $('sort').value, wanted = Number($('species').value) || 0;
+  const share = (row) => row.species.find((one) => one.id === wanted)?.share || 0;
+  const score = (row) => ({
+    moneyPerRequest: row.chance * row.money, money: row.money, experiencePerRequest: row.chance * row.experience,
+    experience: row.experience, chance: row.chance, trophies: row.trophies, species: row.chance * share(row),
+  }[sort]);
+  let rows = advice.rows.slice();
+  if (wanted) rows = rows.filter((row) => share(row) > 0);
+  rows.sort((a, b) => score(b) - score(a));
+  $('advisor-table').innerHTML = table(
+    [['Локация'], ['Наживка'], ['Глубина / дно', 'num'], ['Клёв', 'num'], ['Деньги', 'num'], ['Опыт', 'num'], ['Трофеи', 'num'], ['Кто клюёт']],
+    rows.slice(0, 60).map((row) => `<tr><td>${esc(row.locationName)}</td><td>${esc(row.baitName)}</td>
+      <td class="num">${round(row.depth)} / ${round(row.bottom)} см${row.measured ? '' : ' <span class="muted">?</span>'}</td>
+      <td class="num">${percent(row.chance)}</td><td class="num">${money(row.money)}</td><td class="num">${round(row.experience)}</td>
+      <td class="num">${percent(row.trophies)}</td>
+      <td class="species">${row.species.slice(0, 5).map((one) => `${esc(one.name)} ${percent(one.share)}, ~${round(one.grams)} г`).join('; ')}</td></tr>`),
+    advice.rows.length ? 'Под выбранный вид ничего нет.' : 'У персонажа нет наживки, на которую здесь клюёт.');
+  $('advisor-note').textContent = `${advice.character}, ${advice.baseName}, ${advice.night ? 'ночь' : 'день'}. ` +
+    'Клёв — шанс поклёвки на один запрос клиента; деньги (у скупщика), опыт и трофеи — в среднем за одну поклёвку, с навыками, репутацией базы и VIP персонажа. ' +
+    'Глубина и дно — из последнего заброса на этой локации; со знаком «?» заброса не было, и наживка считается лежащей на дне в 2 м.';
+}
+
+['who', 'base', 'night'].forEach((id) => $(id).addEventListener('change', () => {
+  if (id === 'who') $('base').value = '';
+  showAdvisor().catch(fail);
+}));
+['sort', 'species'].forEach((id) => $(id).addEventListener('change', drawAdvice));
+
+function fail(error) { const box = $(`${tab}-table`); if (box) box.innerHTML = `<div class="empty">Ошибка: ${esc(error.message)}</div>`; }
+function refresh() {
+  const work = { online: showOnline, characters: showCharacters, advisor: showAdvisor }[tab];
+  work().catch(fail);
+}
+refresh();
+setInterval(() => { if (tab !== 'advisor') refresh(); }, 5000);
+</script>
+</body>
+</html>

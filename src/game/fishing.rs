@@ -36,7 +36,7 @@ const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
 const NIGHT_START_HOUR: f64 = 21.5;
 const NIGHT_END_HOUR: f64 = 4.5;
 
-pub(super) fn is_night(settings: &FishingSettings) -> bool {
+pub fn is_night(settings: &FishingSettings) -> bool {
     let now = Local::now().time();
     let hours = f64::from(now.num_seconds_from_midnight()) / 3600.0;
     let game_hour = (hours * settings.game_hours_per_real_hour) % 24.0;

@@ -5,6 +5,7 @@ mod messages;
 mod photon;
 mod server;
 mod storage;
+mod web;
 mod world;
 
 use std::fs::{self, OpenOptions};
@@ -19,7 +20,7 @@ use tokio::net::TcpListener;
 use storage::{SqliteStorage, Storage};
 use world::{Log, World};
 
-const USAGE: &str = "af2-server [--config <dir>] [--db <file>] [--bind <ip>] [--port <n>] [--trace <file>]";
+const USAGE: &str = "af2-server [--config <dir>] [--db <file>] [--bind <ip>] [--port <n>] [--web-port <n>] [--trace <file>]";
 
 #[derive(Default)]
 struct Options {
@@ -27,6 +28,7 @@ struct Options {
     db: Option<PathBuf>,
     bind: Option<String>,
     port: Option<u16>,
+    web_port: Option<u16>,
     trace: Option<PathBuf>,
 }
 
@@ -40,6 +42,7 @@ fn parse_options() -> Result<Option<Options>> {
             "--db" => options.db = Some(value()?.into()),
             "--bind" => options.bind = Some(value()?),
             "--port" => options.port = Some(value()?.parse().context("--port")?),
+            "--web-port" => options.web_port = Some(value()?.parse().context("--web-port")?),
             "--trace" => options.trace = Some(value()?.into()),
             "-h" | "--help" => return Ok(None),
             other => bail!("unknown argument {other}\n{USAGE}"),
@@ -73,6 +76,8 @@ async fn run(options: Options) -> Result<()> {
 
     let bind = options.bind.unwrap_or_else(|| data.settings.server.bind.clone());
     let port = options.port.unwrap_or(data.settings.server.port);
+    let web_bind = data.settings.server.web_bind.clone();
+    let web_port = options.web_port.unwrap_or(data.settings.server.web_port);
     let world = Arc::new(World::new(
         data.settings,
         data.fish,
@@ -85,6 +90,15 @@ async fn run(options: Options) -> Result<()> {
 
     let listener = TcpListener::bind((bind.as_str(), port)).await?;
     world.log.line(&format!("listening on {bind}:{port}, saving to {}", db_path.display()));
+    if web_port > 0 {
+        match TcpListener::bind((web_bind.as_str(), web_port)).await {
+            Ok(web) => {
+                world.log.line(&format!("web pages on http://{web_bind}:{web_port}/"));
+                tokio::spawn(web::serve(web, world.clone()));
+            }
+            Err(error) => world.log.line(&format!("web pages: cannot listen on {web_bind}:{web_port}: {error}")),
+        }
+    }
 
     let mut next_connection = 0u64;
     loop {

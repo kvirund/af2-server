@@ -217,6 +217,12 @@ impl Storage for SqliteStorage {
         Ok(rows.into_iter().map(|(id, name, level, appearance)| CharacterSummary { id, name, level, appearance }).collect())
     }
 
+    async fn all_characters(&self) -> Result<Vec<CharacterSummary>> {
+        let rows: Vec<(i64, String, i32, Vec<u8>)> =
+            sqlx::query_as("SELECT id, name, level, appearance FROM characters ORDER BY id").fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(id, name, level, appearance)| CharacterSummary { id, name, level, appearance }).collect())
+    }
+
     async fn name_taken(&self, name: &str) -> Result<bool> {
         let names: Vec<(String,)> = sqlx::query_as("SELECT name FROM characters").fetch_all(&self.pool).await?;
         let wanted = name.to_lowercase();

@@ -17,6 +17,8 @@ use crate::storage::{CharacterData, Vitals};
 
 /// Seconds in play since the last death (or since this was counted).
 pub const ALIVE_KEY: &str = "alive_seconds";
+/// Seconds in play in all.
+pub const PLAYED_KEY: &str = "played_seconds";
 const BASE_LOCATION: i32 = 0;
 
 /// The experience of the current level a death takes; the level stays.

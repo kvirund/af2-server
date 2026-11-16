@@ -220,7 +220,7 @@ mod tests {
     use super::*;
 
     fn base(locations: Vec<i32>) -> BaseSettings {
-        BaseSettings { min_level: 1, travel_cost: 0, locations }
+        BaseSettings { name: String::new(), min_level: 1, travel_cost: 0, locations }
     }
 
     #[test]

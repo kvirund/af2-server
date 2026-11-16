@@ -161,6 +161,8 @@ pub async fn tick(session: &mut Session) -> Result<()> {
         return Ok(());
     }
     player.last_title_check = Instant::now();
+    let played = player.data.quest_values.entry(death::PLAYED_KEY.into()).or_insert(0);
+    *played = played.saturating_add(seconds as i32);
     if !player.dead {
         let alive = player.data.quest_values.entry(death::ALIVE_KEY.into()).or_insert(0);
         *alive = alive.saturating_add(seconds as i32);

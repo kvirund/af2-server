@@ -6,18 +6,19 @@ mod cards;
 mod chat;
 mod character;
 mod crafting;
-mod death;
+pub mod death;
 mod deeds;
 mod dialog;
 mod doctor;
 mod effects;
+pub mod advisor;
 mod fishing;
 mod fridge;
 mod generator;
 mod gathering;
 mod inventory;
 mod loot;
-mod keepnet;
+pub mod keepnet;
 mod packages;
 mod panels;
 mod perks;
@@ -133,18 +134,11 @@ pub struct Player {
     pub dead: bool,
     /// The last cast at each location this session, for the web pages.
     pub casts: BTreeMap<i32, LastCast>,
+    /// When the character entered the game, Unix seconds.
+    pub entered_at: i64,
 }
 
-/// Where the bait went last time at a location.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
-pub struct LastCast {
-    pub depth: f64,
-    pub bottom: f64,
-    /// The bait's template, 0 for none.
-    pub bait: i32,
-    /// Unix seconds.
-    pub at: i64,
-}
+pub use crate::world::LastCast;
 
 impl Player {
     fn new(data: CharacterData) -> Self {
@@ -170,6 +164,7 @@ impl Player {
             icons: BTreeMap::new(),
             dead: false,
             casts: BTreeMap::new(),
+            entered_at: chrono::Utc::now().timestamp(),
         }
     }
 }

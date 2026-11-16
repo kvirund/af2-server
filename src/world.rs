@@ -11,7 +11,33 @@ use chrono::Local;
 use tokio::sync::Notify;
 
 use crate::config::{Catalog, FishTable, Recipe, Settings};
-use crate::storage::{BoardTask, Storage, StoredGatherPoint};
+use crate::storage::{BoardTask, CharacterData, Storage, StoredGatherPoint};
+
+/// Where the bait went last time at a location.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+pub struct LastCast {
+    pub depth: f64,
+    pub bottom: f64,
+    /// The bait's template, 0 for none.
+    pub bait: i32,
+    /// Unix seconds.
+    pub at: i64,
+}
+
+/// A character in play as the web pages see it: a copy its connection
+/// refreshes every few seconds, so the pages never wait on the game.
+#[derive(Debug, Clone)]
+pub struct LiveCharacter {
+    pub data: CharacterData,
+    pub connection: u64,
+    pub base: i32,
+    pub location: i32,
+    /// When the character entered the game, Unix seconds.
+    pub entered_at: i64,
+    pub dead: bool,
+    /// The last cast at each location this session.
+    pub casts: BTreeMap<i32, LastCast>,
+}
 
 pub struct Log {
     trace: Option<Mutex<File>>,
@@ -108,6 +134,7 @@ pub struct World {
     pub store: Box<dyn Storage>,
     pub log: Log,
     online: OnlineCharacters,
+    live: Mutex<HashMap<i64, LiveCharacter>>,
 }
 
 impl World {
@@ -130,6 +157,7 @@ impl World {
             store,
             log,
             online: OnlineCharacters::default(),
+            live: Mutex::default(),
         }
     }
 
@@ -141,6 +169,27 @@ impl World {
 
     pub fn release(&self, character: i64, connection: u64) {
         self.online.release(character, connection);
+        let mut live = self.live.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if live.get(&character).is_some_and(|found| found.connection == connection) {
+            live.remove(&character);
+        }
+    }
+
+    pub fn publish(&self, character: LiveCharacter) {
+        let mut live = self.live.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        live.insert(character.data.id, character);
+    }
+
+    /// Everyone in play, by character id.
+    pub fn live(&self) -> Vec<LiveCharacter> {
+        let live = self.live.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut all: Vec<LiveCharacter> = live.values().cloned().collect();
+        all.sort_by_key(|character| character.data.id);
+        all
+    }
+
+    pub fn live_one(&self, id: i64) -> Option<LiveCharacter> {
+        self.live.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&id).cloned()
     }
 
     /// Offers live only while the server runs, so their ids need not last.

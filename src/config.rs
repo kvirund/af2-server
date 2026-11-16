@@ -20,6 +20,15 @@ const MAX_BAG_PAGES: i32 = 14;
 pub struct ServerSettings {
     pub bind: String,
     pub port: u16,
+    /// The web pages' own address; port 0: none.
+    #[serde(default = "local_address")]
+    pub web_bind: String,
+    #[serde(default)]
+    pub web_port: u16,
+}
+
+fn local_address() -> String {
+    "127.0.0.1".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -363,6 +372,8 @@ pub struct TravelSettings {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseSettings {
+    #[serde(default)]
+    pub name: String,
     pub min_level: i32,
     pub travel_cost: i64,
     pub locations: Vec<i32>,
@@ -393,6 +404,9 @@ pub struct Settings {
     pub loot: LootSettings,
     pub travel: TravelSettings,
     pub bases: BTreeMap<i32, BaseSettings>,
+    /// Location names for the web pages (the client's `maps.txt`).
+    #[serde(default)]
+    pub location_names: BTreeMap<i32, String>,
     /// From `config/gathering.json`; without that file nothing can be gathered.
     #[serde(skip)]
     pub gathering: GatheringSettings,
