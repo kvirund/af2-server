@@ -12,8 +12,8 @@ use crate::world::{LastCast, World};
 
 /// Natural baits, imitations and boilies, lures.
 const BAIT_KINDS: [i32; 3] = [10, 11, 12];
-/// Bags from this one on are not the character's own: deleted, storage...
-const FIRST_NON_INVENTORY_BAG: i32 = 50;
+/// Bags whose baits the character does not carry: deleted things, storage.
+const NOT_CARRIED_BAGS: [i32; 2] = [50, 52];
 /// Weight rolls per species and kind of request.
 const SAMPLES: usize = 48;
 /// Where the bait is taken to be without a cast to measure the place: on
@@ -49,12 +49,12 @@ pub struct SpeciesForecast {
     pub trophies: f64,
 }
 
-/// The bait templates the character carries.
+/// The bait templates the character carries: in the backpack or on a rod.
 pub fn baits_of(world: &World, character: &CharacterData) -> Vec<i32> {
     let mut baits: Vec<i32> = character
         .items
         .iter()
-        .filter(|item| item.bag < FIRST_NON_INVENTORY_BAG)
+        .filter(|item| !NOT_CARRIED_BAGS.contains(&item.bag))
         .filter(|item| world.catalog.get(item.template).is_some_and(|template| BAIT_KINDS.contains(&template.kind)))
         .map(|item| item.template)
         .collect();
