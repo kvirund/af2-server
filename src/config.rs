@@ -824,6 +824,30 @@ pub struct BoardSettings {
     /// Base id to more resource rewards found only on that base's board.
     #[serde(default)]
     pub base_resource_items: BTreeMap<i32, Vec<i32>>,
+    /// Union tasks on the reputation tab of some boards.
+    #[serde(default)]
+    pub unions: Vec<UnionBoard>,
+}
+
+/// A union's tasks on a board: a fish its rods catch, union reputation for it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnionBoard {
+    pub faction: i32,
+    pub bases: Vec<i32>,
+    /// Offers of the union on the tab, besides the base's own.
+    pub offers: usize,
+    /// Only fish that take a bait of this kind (12: lures); 0: any.
+    #[serde(default)]
+    pub bait_kind: i32,
+    /// Only fish that keep to the bottom.
+    #[serde(default)]
+    pub near_bottom: bool,
+    /// Union reputation per colour step.
+    pub points: i64,
+    /// Item and pieces added to the reward; item 0: none.
+    #[serde(default)]
+    pub item: [i32; 2],
 }
 
 /// The VIP patent: its price and what it gives.

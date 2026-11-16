@@ -23,7 +23,7 @@ use rand::random;
 use super::fishing::{LARGE_CLASS, TROPHY_CLASS, experience_for};
 use super::{Conn, Outcome, Player, Session, active, character, chat, inventory, keepnet, reputation, tournaments, travel};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{BoardSettings, FishTable, Settings, Species};
+use crate::config::{BoardSettings, Catalog, FishTable, Settings, Species, UnionBoard};
 use crate::messages as msg;
 use crate::storage::{BoardTask, CaughtFish, CharacterData};
 use crate::world::{BoardOffer, BoardOffers};
@@ -153,17 +153,42 @@ fn resource_items(board: &BoardSettings, base: i32) -> Vec<i32> {
     items
 }
 
+/// The baits of a species a union's task may name: all, or those of its kind.
+fn baits_for(catalog: &Catalog, species: &Species, union: Option<&UnionBoard>) -> Vec<i32> {
+    let kind = union.map_or(0, |union| union.bait_kind);
+    species.baits.iter().copied().filter(|bait| kind == 0 || catalog.get(*bait).is_some_and(|item| item.kind == kind)).collect()
+}
+
+/// Whether a union's rods catch the species.
+fn fits_union(catalog: &Catalog, species: &Species, union: &UnionBoard) -> bool {
+    (!union.near_bottom || species.near_bottom) && (union.bait_kind == 0 || !baits_for(catalog, species, Some(union)).is_empty())
+}
+
 /// One offer: the fish, what of it, and the reward, which grows with the
-/// worth and experience of the fish asked for.
-fn make_offer(settings: &Settings, fish: &FishTable, base: i32, category: i32, ends_at: i64, roll: &mut impl FnMut() -> f64) -> Option<BoardOffer> {
+/// worth and experience of the fish asked for. A union's offer asks for a
+/// fish its rods catch and gives its reputation.
+fn make_offer(
+    settings: &Settings,
+    catalog: &Catalog,
+    fish: &FishTable,
+    base: i32,
+    category: i32,
+    union: Option<&UnionBoard>,
+    ends_at: i64,
+    roll: &mut impl FnMut() -> f64,
+) -> Option<BoardOffer> {
     let board = &settings.board;
-    let pool = species_at(settings, fish, base);
+    let mut pool = species_at(settings, fish, base);
+    if let Some(union) = union {
+        pool.retain(|species| fits_union(catalog, species, union));
+    }
     if pool.is_empty() {
         return None;
     }
     let species = pick_species(&pool, roll());
+    let baits = baits_for(catalog, species, union);
     let mut task = pick(roll(), kinds(category));
-    if task == WEIGHT_ON_BAIT && species.baits.is_empty() {
+    if task == WEIGHT_ON_BAIT && baits.is_empty() {
         task = WEIGHT;
     }
     let quality = quality_of(&board.quality_weights, roll());
@@ -181,12 +206,20 @@ fn make_offer(settings: &Settings, fish: &FishTable, base: i32, category: i32, e
     }
     .max(1);
     let target = if is_weighed(task) { ((count * typical) / 100 * 100).max(100) } else { count };
-    let bait = if task == WEIGHT_ON_BAIT { pick(roll(), &species.baits) } else { 0 };
+    let bait = if task == WEIGHT_ON_BAIT { pick(roll(), &baits) } else { 0 };
 
     let worth = keepnet::value_of(fish, &settings.fish_market, species, count * typical, size_class) as f64;
     let experience = f64::from(count * experience_for(&settings.progression, typical, size_class, 1.0));
     let mut reward = Vec::new();
     match category {
+        _ if union.is_some() => {
+            let union = union?;
+            reward.push(format!("exp={}", (experience * board.experience_percent / 100.0 * size).round() as i64));
+            reward.push(format!("repfrac={}/{}", union.faction, union.points * i64::from(quality + 1)));
+            if union.item[0] > 0 {
+                reward.push(format!("wpn={}/{}", union.item[0], union.item[1].max(1)));
+            }
+        }
         INCOME => reward.push(format!("money={}", (worth * board.income_percent / 100.0 * size).round() as i64)),
         RESOURCES => {
             let items = resource_items(board, base);
@@ -253,10 +286,16 @@ fn refresh(conn: &Conn, offers: &mut BoardOffers, base: i32, category: i32, now:
     let board = &settings.board;
     let ends_at = now + refresh_minutes(board, category).max(1) * 60;
     let how_many = if category == DAILY { board.daily_offers } else { board.offers };
+    let unions: Vec<&UnionBoard> = if category == EXPERIENCE {
+        board.unions.iter().filter(|union| union.bases.contains(&base)).flat_map(|union| std::iter::repeat_n(union, union.offers)).collect()
+    } else {
+        Vec::new()
+    };
     let mut roll = random::<f64>;
     offers.refresh_at = ends_at;
-    offers.offers = (0..how_many)
-        .filter_map(|_| make_offer(settings, &conn.world.fish, base, category, ends_at, &mut roll))
+    offers.offers = std::iter::repeat_n(None, how_many)
+        .chain(unions.into_iter().map(Some))
+        .filter_map(|union| make_offer(settings, &conn.world.catalog, &conn.world.fish, base, category, union, ends_at, &mut roll))
         .map(|mut offer| {
             offer.id = conn.world.next_offer_id();
             offer
@@ -620,6 +659,56 @@ mod tests {
         };
         assert_eq!(resource_items(&board, 4), vec![1244, 1314, 1330]);
         assert_eq!(resource_items(&board, 6), vec![1244]);
+    }
+
+    fn bait(id: i32, kind: i32) -> crate::config::CatalogItem {
+        crate::config::CatalogItem {
+            id,
+            kind,
+            cost: 0,
+            durability: 1.0,
+            stacks: true,
+            shop_count: 1,
+            max_count: 1,
+            premium_cost: 0,
+            xml: String::new(),
+            refine: String::new(),
+            name: String::new(),
+            cost_item: [0, 0],
+        }
+    }
+
+    fn species(id: i32, near_bottom: bool, baits: Vec<i32>) -> Species {
+        Species {
+            id,
+            name: String::new(),
+            small_grams: 100,
+            large_grams: 1000,
+            trophy_grams: 5000,
+            min_depth_cm: 0,
+            max_depth_cm: 300,
+            near_bottom,
+            likes_depth: false,
+            night_factor: 1.0,
+            hardy: false,
+            share: 1.0,
+            baits,
+        }
+    }
+
+    #[test]
+    fn unions_ask_for_the_fish_their_rods_catch() {
+        let catalog = Catalog::new(vec![bait(1010, 10), bait(2001, 12)]);
+        let spinners = UnionBoard { faction: 1002, bait_kind: 12, ..Default::default() };
+        let bottom = UnionBoard { faction: 1004, near_bottom: true, ..Default::default() };
+        let pike = species(1, false, vec![1010, 2001]);
+        let bream = species(2, true, vec![1010]);
+        assert!(fits_union(&catalog, &pike, &spinners));
+        assert!(!fits_union(&catalog, &bream, &spinners));
+        assert!(fits_union(&catalog, &bream, &bottom));
+        assert!(!fits_union(&catalog, &pike, &bottom));
+        assert_eq!(baits_for(&catalog, &pike, Some(&spinners)), vec![2001]);
+        assert_eq!(baits_for(&catalog, &pike, None), vec![1010, 2001]);
     }
 
     #[test]

@@ -129,7 +129,8 @@ pub async fn fish_released(conn: &Conn, player: &mut Player, grams: i32) -> Resu
     add(conn, player, faction, for_release(&settings.reputation, grams)).await
 }
 
-/// A guild's reputation for a fish landed, if a «Вклад» skill covers the rod.
+/// A guild's reputation for a fish landed, if a «Вклад» skill covers the rod
+/// and the guild is open: one of its tasks done (the board, Лиза, Паша).
 pub async fn fish_landed(conn: &Conn, player: &mut Player, bait_item: i64, grams: i32) -> Result<()> {
     let settings = &conn.world.settings.reputation;
     let Some(kind) = rod_kind(&conn.world.catalog, &player.data.items, bait_item) else {
@@ -138,6 +139,9 @@ pub async fn fish_landed(conn: &Conn, player: &mut Player, bait_item: i64, grams
     let Some(skill) = settings.contribution.iter().find(|skill| skill.rod_kind == kind) else {
         return Ok(());
     };
+    if player.data.reputation.get(&skill.faction).copied().unwrap_or(0) <= 0 {
+        return Ok(());
+    }
     let level = perks::level_of(conn, player, skill.perk);
     if let Some((faction, points)) = for_contribution(settings, kind, level, grams) {
         add(conn, player, faction, points).await?;
