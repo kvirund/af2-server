@@ -6,9 +6,25 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 use sqlx::{Sqlite, Transaction};
 
 use super::{
-    BoardTask, Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT, Vitals,
-    parse_traits, traits_text,
+    BoardTask, Catches, CaughtFish, CharacterData, CharacterSummary, ItemEntry, Letter, Record, Skill, Storage, StoredGatherPoint, UNKNOWN_BAIT,
+    Vitals, parse_parts, parse_traits, parts_text, traits_text,
 };
+
+async fn insert_letter_items(transaction: &mut Transaction<'_, Sqlite>, letter: i64, items: &[ItemEntry]) -> Result<()> {
+    for item in items {
+        sqlx::query("INSERT INTO letter_items (id, letter_id, count, durability, template, param, parts) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(item.id)
+            .bind(letter)
+            .bind(item.count)
+            .bind(f64::from(item.durability))
+            .bind(item.template)
+            .bind(item.param)
+            .bind(parts_text(&item.parts))
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
+}
 
 const MAX_CONNECTIONS: u32 = 4;
 
@@ -480,6 +496,81 @@ impl Storage for SqliteStorage {
         transaction.commit().await?;
         Ok(())
     }
+
+    async fn send_letter(&self, letter: &Letter) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO letters (id, to_character, from_character, from_name, subject, body, money, sent_at, seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(letter.id)
+        .bind(letter.to)
+        .bind(letter.from)
+        .bind(&letter.from_name)
+        .bind(&letter.subject)
+        .bind(&letter.body)
+        .bind(letter.money)
+        .bind(letter.sent_at)
+        .bind(letter.seen)
+        .execute(&mut *transaction)
+        .await?;
+        insert_letter_items(&mut transaction, letter.id, &letter.items).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn letters_for(&self, character: i64) -> Result<Vec<Letter>> {
+        let rows: Vec<(i64, i64, String, String, String, i64, i64, bool)> = sqlx::query_as(
+            "SELECT id, from_character, from_name, subject, body, money, sent_at, seen FROM letters WHERE to_character = ? ORDER BY sent_at DESC, id DESC",
+        )
+        .bind(character)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut letters = Vec::with_capacity(rows.len());
+        for (id, from, from_name, subject, body, money, sent_at, seen) in rows {
+            let items: Vec<(i64, i32, f64, i32, i32, String)> =
+                sqlx::query_as("SELECT id, count, durability, template, param, parts FROM letter_items WHERE letter_id = ? ORDER BY id")
+                    .bind(id)
+                    .fetch_all(&self.pool)
+                    .await?;
+            let items = items
+                .into_iter()
+                .map(|(id, count, durability, template, param, parts)| ItemEntry {
+                    id,
+                    bag: 0,
+                    cell: 0,
+                    count,
+                    durability: durability as f32,
+                    template,
+                    param,
+                    parts: parse_parts(&parts),
+                })
+                .collect();
+            letters.push(Letter { id, to: character, from, from_name, subject, body, money, sent_at, seen, items });
+        }
+        Ok(letters)
+    }
+
+    async fn mark_letter_seen(&self, id: i64) -> Result<()> {
+        sqlx::query("UPDATE letters SET seen = 1 WHERE id = ?").bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn set_letter_contents(&self, id: i64, money: i64, items: &[ItemEntry]) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE letters SET money = ? WHERE id = ?").bind(money).bind(id).execute(&mut *transaction).await?;
+        sqlx::query("DELETE FROM letter_items WHERE letter_id = ?").bind(id).execute(&mut *transaction).await?;
+        insert_letter_items(&mut transaction, id, items).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn delete_letter(&self, id: i64) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM letter_items WHERE letter_id = ?").bind(id).execute(&mut *transaction).await?;
+        sqlx::query("DELETE FROM letters WHERE id = ?").bind(id).execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +593,35 @@ mod tests {
         store.save_gather_points(2, &[point(2, 5, 102)]).await.unwrap();
         store.save_gather_points(1, &[point(1, 5, 0)]).await.unwrap();
         assert_eq!(store.load_gather_points().await.unwrap(), vec![point(1, 5, 0), point(2, 5, 102)]);
+    }
+
+    #[tokio::test]
+    async fn a_letter_keeps_its_things_until_they_are_taken() {
+        let store = memory_store().await;
+        let item = ItemEntry { id: 40, bag: 0, cell: 0, count: 3, durability: 0.5, template: 1018, param: 0, parts: [1, 0, 0, 2] };
+        let letter = Letter {
+            id: 9,
+            to: 2,
+            from: 1,
+            from_name: "Квирунд".into(),
+            subject: "Привет".into(),
+            body: "Держи".into(),
+            money: 500,
+            sent_at: 1_700_000_000,
+            seen: false,
+            items: vec![item.clone()],
+        };
+        store.send_letter(&letter).await.unwrap();
+        assert_eq!(store.letters_for(2).await.unwrap(), vec![letter.clone()]);
+        assert!(store.letters_for(1).await.unwrap().is_empty());
+
+        store.mark_letter_seen(9).await.unwrap();
+        store.set_letter_contents(9, 0, &[]).await.unwrap();
+        let left = store.letters_for(2).await.unwrap();
+        assert!(left[0].seen && !left[0].carries());
+
+        store.delete_letter(9).await.unwrap();
+        assert!(store.letters_for(2).await.unwrap().is_empty());
     }
 
     #[tokio::test]

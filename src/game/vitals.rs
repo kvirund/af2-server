@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use std::collections::BTreeMap;
 
-use super::{Conn, Outcome, Player, Session, active, death, fishing, fridge, inventory, perks, scripts, titles, travel};
+use super::{Conn, Outcome, Player, Session, active, death, fishing, fridge, inventory, mail, perks, scripts, titles, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{DoctorSettings, ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
@@ -192,6 +192,7 @@ pub async fn tick(session: &mut Session) -> Result<()> {
         dead: player.dead,
         casts: player.casts.clone(),
     });
+    mail::check(conn, player).await?;
     let limits = limits(settings, &conn.world.catalog, &player.data);
     if let Some(vitals) = player.data.vitals.as_mut() {
         advance(&settings.vitals, &limits, vitals, &passing);

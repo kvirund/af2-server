@@ -420,6 +420,8 @@ pub struct Settings {
     #[serde(default)]
     pub vip: VipSettings,
     #[serde(default)]
+    pub mail: MailSettings,
+    #[serde(default)]
     pub board: BoardSettings,
     #[serde(default)]
     pub spas: SpasSettings,
@@ -889,6 +891,12 @@ pub struct VipSettings {
     pub loot_chance_percent: f64,
     /// Added to the experience for a fish.
     pub experience_percent: f64,
+    /// Taken off the wait between daily board tasks.
+    #[serde(default)]
+    pub task_wait_percent: f64,
+    /// Taken off what a letter costs to send.
+    #[serde(default)]
+    pub mail_cost_percent: f64,
     /// Experience points for the skill on study while online.
     pub skill_points_per_minute: f64,
 }
@@ -1007,6 +1015,19 @@ pub struct ReputationSettings {
     /// By skill level from 1: points for each fish and grams for one point more.
     pub contribution_levels: Vec<[i64; 2]>,
     pub per_level: ReputationBonuses,
+}
+
+/// Mail: who may send and what a letter costs, in hundredths.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailSettings {
+    pub min_level: i32,
+    pub base_cost: i64,
+    /// Of the money sent with the letter.
+    pub money_percent: f64,
+    pub item_cost: i64,
+    /// Characters a name search lists at most.
+    pub most_found: usize,
 }
 
 /// Fish kept on ice, one fridge per base.

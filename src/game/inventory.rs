@@ -114,6 +114,17 @@ fn free_place(
     (0..panels::cells_in(settings, character, page)).find(|cell| !taken(*cell)).map(|cell| (page, cell))
 }
 
+/// Puts a whole item as it is (its id, wear and parts) into a free cell of the
+/// page for its kind; gives it back when the page is full.
+pub fn put_in_free_cell(settings: &BagSettings, character: &mut CharacterData, mut item: ItemEntry, kind: i32) -> Result<ItemEntry, ItemEntry> {
+    let Some((bag, cell)) = free_place(settings, character, kind, None, &[]) else {
+        return Err(item);
+    };
+    (item.bag, item.cell) = (bag, cell);
+    character.items.push(item.clone());
+    Ok(item)
+}
+
 /// Older saves kept loose items in bag 0, which the client never draws, and
 /// some kinds on the other page («Разное») before they had a page of their own.
 /// An item whose page is full waits where it is until the page has room.

@@ -8,7 +8,9 @@
 //! move the selected fish and send 167 (into the fridge) or 168 (out of it),
 //! both int fridge and long fish. The client moves the fish itself and ignores
 //! any reply. Here the fridge number is the base, and fish on ice keep their
-//! place in the character's fish with list [`FIRST_LIST`] plus the base.
+//! place in the character's fish with list [`FIRST_LIST`] plus the base. A
+//! fish comes out only if the keepnet in use has room for it by count and
+//! weight; otherwise the keepnet is sent again and the fish stays on ice.
 
 use anyhow::Result;
 
@@ -111,7 +113,12 @@ pub async fn transfer(session: &mut Session, message: &AfcMessage) -> Result<Out
     } else {
         (list_of(base), keepnet::IN_USE_LIST)
     };
-    let full = putting && on_ice(&player.data, base).count() as i32 >= places(&conn.world.settings.fridge, &player.data, base);
+    let full = if putting {
+        on_ice(&player.data, base).count() as i32 >= places(&conn.world.settings.fridge, &player.data, base)
+    } else {
+        let grams = player.data.fish.iter().find(|fish| fish.id == id).map_or(0, |fish| fish.grams);
+        !keepnet::has_room(keepnet::capacity(&conn.world, &player.data), &player.data, grams)
+    };
     let fish = player.data.fish.iter_mut().find(|fish| fish.id == id && fish.list == from);
     match fish {
         Some(fish) if !full => {

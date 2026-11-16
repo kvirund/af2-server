@@ -81,6 +81,18 @@ pub const ARTELS: i32 = 450;
 pub const STATISTICS: i32 = 1150;
 pub const STORAGE: i32 = 1230;
 pub const VITALS: i32 = 1000;
+/// Mail (`game/mail.rs`). C→S 1600 opens the box; S→C 1600 lists, 1601 opens the window.
+pub const MAIL: i32 = 1600;
+pub const MAIL_WINDOW: i32 = 1601;
+pub const MAIL_READ: i32 = 1610;
+pub const MAIL_TAKE: i32 = 1620;
+pub const MAIL_DELETE: i32 = 1640;
+pub const MAIL_DELETE_ALL: i32 = 1650;
+pub const MAIL_SEND: i32 = 1660;
+/// C→S string name, S→C the characters found (the mail form's «Найти»).
+pub const PLAYER_SEARCH: i32 = 45;
+/// S→C int: «Вам пришло письмо».
+pub const MAIL_NOTICE: i32 = 275;
 /// S→C: weather (5 floats: clouds, fog, rain, snow, thunder), then int
 /// radiation, int aggressive environment of the location for the bottom panel.
 pub const WEATHER: i32 = 1001;

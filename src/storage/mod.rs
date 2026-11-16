@@ -201,6 +201,32 @@ pub struct StoredGatherPoint {
     pub respawn_at: i64,
 }
 
+/// A letter in a character's mailbox, with what it carries. Its things are
+/// kept apart from every character's own until they are taken.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Letter {
+    pub id: i64,
+    pub to: i64,
+    /// 0 for a letter from the server.
+    pub from: i64,
+    pub from_name: String,
+    pub subject: String,
+    pub body: String,
+    /// In hundredths, as character money.
+    pub money: i64,
+    /// Unix seconds.
+    pub sent_at: i64,
+    pub seen: bool,
+    /// Bag and cell mean nothing here.
+    pub items: Vec<ItemEntry>,
+}
+
+impl Letter {
+    pub fn carries(&self) -> bool {
+        self.money > 0 || !self.items.is_empty()
+    }
+}
+
 #[async_trait]
 pub trait Storage: Send + Sync {
     /// Finds the account for a login key, creating it the first time.
@@ -228,4 +254,16 @@ pub trait Storage: Send + Sync {
 
     /// Replaces what is kept for this base.
     async fn save_gather_points(&self, base: i32, points: &[StoredGatherPoint]) -> Result<()>;
+
+    async fn send_letter(&self, letter: &Letter) -> Result<()>;
+
+    /// A character's letters, newest first.
+    async fn letters_for(&self, character: i64) -> Result<Vec<Letter>>;
+
+    async fn mark_letter_seen(&self, id: i64) -> Result<()>;
+
+    /// What is left in a letter after some was taken.
+    async fn set_letter_contents(&self, id: i64, money: i64, items: &[ItemEntry]) -> Result<()>;
+
+    async fn delete_letter(&self, id: i64) -> Result<()>;
 }

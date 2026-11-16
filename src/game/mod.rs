@@ -18,6 +18,7 @@ mod generator;
 mod gathering;
 mod inventory;
 mod loot;
+mod mail;
 pub mod keepnet;
 mod packages;
 mod panels;
@@ -301,6 +302,13 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::BOARD_REFUSE => board::refuse(session, message).await,
         msg::BOARD_TAKE => board::take(session, message).await,
         msg::VIP_BUY => vip::buy(session).await,
+        msg::MAIL => mail::open(session).await,
+        msg::MAIL_READ => mail::read(session, message).await,
+        msg::MAIL_TAKE => mail::take(session, message).await,
+        msg::MAIL_DELETE => mail::delete(session, message).await,
+        msg::MAIL_DELETE_ALL => mail::delete_all(session).await,
+        msg::MAIL_SEND => mail::send(session, message).await,
+        msg::PLAYER_SEARCH => mail::search(session, message).await,
 
         _ => Ok(Outcome::Unanswered),
     }

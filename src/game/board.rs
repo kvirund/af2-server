@@ -416,8 +416,14 @@ async fn answer(conn: &Conn, text: &str) -> Result<Outcome> {
     Ok(Outcome::Answered)
 }
 
+/// The wait between daily tasks; VIP takes `vip_wait_percent` off it.
+fn daily_wait_minutes(board: &BoardSettings, vip_wait_percent: f64, character: &CharacterData) -> f64 {
+    let factor = if super::vip::active(character) { 1.0 - vip_wait_percent / 100.0 } else { 1.0 };
+    board.daily_cooldown_minutes as f64 * factor
+}
+
 /// Why a character may not take an offer, as the client's key.
-fn refusal(board: &BoardSettings, character: &CharacterData, offer: &BoardOffer, level: i32, now: i64) -> Option<&'static str> {
+fn refusal(board: &BoardSettings, vip_wait_percent: f64, character: &CharacterData, offer: &BoardOffer, level: i32, now: i64) -> Option<&'static str> {
     let category = offer.task.category;
     if offer.takers.contains(&character.id) {
         return Some("big_count");
@@ -429,7 +435,7 @@ fn refusal(board: &BoardSettings, character: &CharacterData, offer: &BoardOffer,
         return Some("no_get");
     }
     let last_daily = i64::from(character.quest_values.get(DAILY_TAKEN_AT).copied().unwrap_or(0));
-    if category == DAILY && now - last_daily < board.daily_cooldown_minutes * 60 {
+    if category == DAILY && now - last_daily < (daily_wait_minutes(board, vip_wait_percent, character) * 60.0) as i64 {
         return Some("no_time_period");
     }
     None
@@ -452,7 +458,7 @@ pub async fn take(session: &mut Session, message: &AfcMessage) -> Result<Outcome
             .find_map(|(_, offers)| offers.offers.iter_mut().find(|offer| offer.id == offer_id));
         match found {
             None => Err("no_task"),
-            Some(offer) => match refusal(&settings.board, &player.data, offer, level, now) {
+            Some(offer) => match refusal(&settings.board, settings.vip.task_wait_percent, &player.data, offer, level, now) {
                 Some(reason) => Err(reason),
                 None => {
                     offer.takers.insert(player.data.id);
@@ -708,16 +714,20 @@ mod tests {
         let board = BoardSettings { max_taken: 3, daily_cooldown_minutes: 40, ..Default::default() };
         let mut character = CharacterData { id: 5, ..Default::default() };
         let mut offer = BoardOffer { id: 1, task: BoardTask { category: INCOME, ..Default::default() }, reputation: 1, copies: 2, takers: Default::default() };
-        assert_eq!(refusal(&board, &character, &offer, 0, 10_000), Some("no_repa"));
-        assert_eq!(refusal(&board, &character, &offer, 1, 10_000), None);
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 0, 10_000), Some("no_repa"));
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_000), None);
         offer.takers.insert(5);
-        assert_eq!(refusal(&board, &character, &offer, 1, 10_000), Some("big_count"));
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_000), Some("big_count"));
         offer.takers = [6, 7].into_iter().collect();
-        assert_eq!(refusal(&board, &character, &offer, 1, 10_000), Some("no_get"));
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_000), Some("no_get"));
         offer.takers.clear();
         offer.task.category = DAILY;
         character.quest_values.insert(DAILY_TAKEN_AT.into(), 9_000);
-        assert_eq!(refusal(&board, &character, &offer, 1, 10_000), Some("no_time_period"));
-        assert_eq!(refusal(&board, &character, &offer, 1, 20_000), None);
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_000), Some("no_time_period"));
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 20_000), None);
+        // VIP waits half the 40 minutes.
+        character.vip = true;
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_100), Some("no_time_period"));
+        assert_eq!(refusal(&board, 50.0, &character, &offer, 1, 10_300), None);
     }
 }

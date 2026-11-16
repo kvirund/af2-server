@@ -129,6 +129,28 @@ CREATE TABLE IF NOT EXISTS gather_points (
     PRIMARY KEY (base, point)
 );
 
+CREATE TABLE IF NOT EXISTS letters (
+    id INTEGER PRIMARY KEY,
+    to_character INTEGER NOT NULL,
+    from_character INTEGER NOT NULL,
+    from_name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    money INTEGER NOT NULL,
+    sent_at INTEGER NOT NULL,
+    seen INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS letter_items (
+    id INTEGER PRIMARY KEY,
+    letter_id INTEGER NOT NULL REFERENCES letters (id),
+    count INTEGER NOT NULL,
+    durability REAL NOT NULL,
+    template INTEGER NOT NULL,
+    param INTEGER NOT NULL DEFAULT 0,
+    parts TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS id_sequence (
     only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
     next_id INTEGER NOT NULL
@@ -138,4 +160,6 @@ INSERT OR IGNORE INTO id_sequence (only_row, next_id) VALUES (1, 1);
 
 CREATE INDEX IF NOT EXISTS characters_by_account ON characters (account_id);
 CREATE INDEX IF NOT EXISTS items_by_character ON items (character_id);
+CREATE INDEX IF NOT EXISTS letters_by_character ON letters (to_character);
+CREATE INDEX IF NOT EXISTS letter_items_by_letter ON letter_items (letter_id);
 CREATE INDEX IF NOT EXISTS fish_by_character ON fish (character_id);

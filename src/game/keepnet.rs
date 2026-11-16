@@ -9,7 +9,7 @@ use super::{Conn, Outcome, Player, Session, active, inventory, reputation, title
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishMarketSettings, Species};
 use crate::messages as msg;
-use crate::storage::{CaughtFish, traits_text};
+use crate::storage::{CaughtFish, CharacterData, traits_text};
 
 pub const IN_USE_LIST: i32 = 0;
 const SPARE_LIST: i32 = 1;
@@ -23,6 +23,26 @@ const IN_USE_CELL: i32 = 6;
 const SPARE_CELL: i32 = 8;
 const TROPHY_CLASS: i32 = 2;
 const LARGE_CLASS: i32 = 1;
+
+/// What the keepnet in use holds: grams and fish, the first two numbers of its
+/// `basePar` («Вместимость по весу», «по количеству»). Without one, nothing.
+pub fn capacity(world: &crate::world::World, character: &CharacterData) -> (f64, usize) {
+    character
+        .items
+        .iter()
+        .find(|item| item.bag == CLOTHING_BAG && item.cell == IN_USE_CELL)
+        .map_or((0.0, 0), |item| {
+            let [grams, fish, _] = super::scripts::base_par(&inventory::item_xml(world, item));
+            (grams, fish.max(0.0) as usize)
+        })
+}
+
+/// Whether one more fish of this weight goes into the keepnet in use.
+pub fn has_room(capacity: (f64, usize), character: &CharacterData, grams: i32) -> bool {
+    let inside: Vec<&CaughtFish> = character.fish.iter().filter(|fish| fish.list == IN_USE_LIST).collect();
+    let weight: i64 = inside.iter().map(|fish| i64::from(fish.grams)).sum();
+    inside.len() < capacity.1 && (weight + i64::from(grams)) as f64 <= capacity.0
+}
 
 /// The market's demand bar, kept full: there is no market to move it.
 const FULL_DEMAND: f32 = 1.0;
@@ -244,6 +264,16 @@ pub async fn sell(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keepnet_holds_so_many_fish_and_so_much_weight() {
+        let fish = |id, grams, list| CaughtFish { id, species: 1, grams, size_class: 0, bait: 0, list, experience: 0, traits: Vec::new() };
+        let character = CharacterData { fish: vec![fish(1, 3000, IN_USE_LIST), fish(2, 1500, IN_USE_LIST), fish(3, 9000, SPARE_LIST)], ..Default::default() };
+        assert!(has_room((5000.0, 20), &character, 500));
+        assert!(!has_room((5000.0, 20), &character, 600));
+        assert!(!has_room((50_000.0, 2), &character, 100));
+        assert!(!has_room((0.0, 0), &character, 1));
+    }
 
     fn market() -> FishMarketSettings {
         FishMarketSettings { base_price_per_kg: 100.0, large_price_factor: 1.5, trophy_price_factor: 3.0, buyers: Default::default() }

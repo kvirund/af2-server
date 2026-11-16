@@ -135,6 +135,8 @@ pub struct World {
     pub log: Log,
     online: OnlineCharacters,
     live: Mutex<HashMap<i64, LiveCharacter>>,
+    /// Characters with a letter they have not been told of.
+    mail_notices: Mutex<HashSet<i64>>,
 }
 
 impl World {
@@ -158,6 +160,7 @@ impl World {
             log,
             online: OnlineCharacters::default(),
             live: Mutex::default(),
+            mail_notices: Mutex::default(),
         }
     }
 
@@ -186,6 +189,15 @@ impl World {
         let mut all: Vec<LiveCharacter> = live.values().cloned().collect();
         all.sort_by_key(|character| character.data.id);
         all
+    }
+
+    /// A letter came for the character; its connection tells it on its next tick.
+    pub fn notify_mail(&self, character: i64) {
+        self.mail_notices.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(character);
+    }
+
+    pub fn take_mail_notice(&self, character: i64) -> bool {
+        self.mail_notices.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&character)
     }
 
     pub fn live_one(&self, id: i64) -> Option<LiveCharacter> {
