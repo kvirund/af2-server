@@ -81,6 +81,9 @@ pub const ARTELS: i32 = 450;
 pub const STATISTICS: i32 = 1150;
 pub const STORAGE: i32 = 1230;
 pub const VITALS: i32 = 1000;
+/// S→C: weather (5 floats: clouds, fog, rain, snow, thunder), then int
+/// radiation, int aggressive environment of the location for the bottom panel.
+pub const WEATHER: i32 = 1001;
 pub const ITEM_USE: i32 = 1320;
 pub const PERKS_UPDATE: i32 = 1400;
 pub const PERKS: i32 = 1401;

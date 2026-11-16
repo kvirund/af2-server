@@ -55,7 +55,7 @@ pub fn script_of(xml: &str) -> Option<String> {
     (!script.is_empty()).then_some(script)
 }
 
-fn base_par(xml: &str) -> [f64; 3] {
+pub(super) fn base_par(xml: &str) -> [f64; 3] {
     let mut out = [0.0; 3];
     if let Some((_, rest)) = xml.split_once("<basePar>") {
         let fields = rest.split('<').next().unwrap_or("").split('/');

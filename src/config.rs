@@ -66,6 +66,11 @@ pub struct FishingSettings {
     /// The heaviest fish that bites, as a multiple of the weakest test of the
     /// rod, reel and line; 0 for no limit.
     pub tackle_weight_factor: f64,
+    /// «Матч»: without this skill nothing bites on a rod with match tackle.
+    #[serde(default)]
+    pub match_perk: i32,
+    #[serde(default)]
+    pub match_items: Vec<i32>,
     /// Individual traits a landed fish may have.
     #[serde(default)]
     pub traits: Vec<TraitSettings>,
@@ -191,6 +196,13 @@ pub struct VitalsSettings {
     pub max_work_points: f32,
     /// Base to its radiation by day and at night.
     pub radiation: BTreeMap<i32, [f32; 2]>,
+    /// Base to its aggressive environment by day and at night.
+    #[serde(default)]
+    pub aggression: BTreeMap<i32, [f32; 2]>,
+    /// Food and water go this many percent faster for each point of radiation
+    /// and aggressive environment that gets through the suit.
+    #[serde(default)]
+    pub environment_hunger_percent: f32,
 }
 
 #[derive(Default, Debug, Deserialize)]

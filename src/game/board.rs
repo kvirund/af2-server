@@ -26,7 +26,7 @@ use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BoardSettings, Catalog, FishTable, Settings, Species, UnionBoard};
 use crate::messages as msg;
 use crate::storage::{BoardTask, CaughtFish, CharacterData};
-use crate::world::{BoardOffer, BoardOffers};
+use crate::world::{BoardOffer, BoardOffers, World};
 
 /// Categories below this are NPC quests (`quests.rs`), not the board's.
 pub(super) const FIRST_BOARD_CATEGORY: i32 = 1000;
@@ -167,16 +167,8 @@ fn fits_union(catalog: &Catalog, species: &Species, union: &UnionBoard) -> bool 
 /// One offer: the fish, what of it, and the reward, which grows with the
 /// worth and experience of the fish asked for. A union's offer asks for a
 /// fish its rods catch and gives its reputation.
-fn make_offer(
-    settings: &Settings,
-    catalog: &Catalog,
-    fish: &FishTable,
-    base: i32,
-    category: i32,
-    union: Option<&UnionBoard>,
-    ends_at: i64,
-    roll: &mut impl FnMut() -> f64,
-) -> Option<BoardOffer> {
+fn make_offer(world: &World, base: i32, category: i32, union: Option<&UnionBoard>, ends_at: i64, roll: &mut impl FnMut() -> f64) -> Option<BoardOffer> {
+    let (settings, catalog, fish) = (&world.settings, &world.catalog, &world.fish);
     let board = &settings.board;
     let mut pool = species_at(settings, fish, base);
     if let Some(union) = union {
@@ -295,7 +287,7 @@ fn refresh(conn: &Conn, offers: &mut BoardOffers, base: i32, category: i32, now:
     offers.refresh_at = ends_at;
     offers.offers = std::iter::repeat_n(None, how_many)
         .chain(unions.into_iter().map(Some))
-        .filter_map(|union| make_offer(settings, &conn.world.catalog, &conn.world.fish, base, category, union, ends_at, &mut roll))
+        .filter_map(|union| make_offer(&conn.world, base, category, union, ends_at, &mut roll))
         .map(|mut offer| {
             offer.id = conn.world.next_offer_id();
             offer

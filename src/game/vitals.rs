@@ -6,11 +6,12 @@ use anyhow::Result;
 
 use std::collections::BTreeMap;
 
-use super::{Conn, Outcome, Player, Session, active, death, fishing, fridge, inventory, perks, titles, travel};
+use super::{Conn, Outcome, Player, Session, active, death, fishing, fridge, inventory, perks, scripts, titles, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{DoctorSettings, ProgressionSettings, Settings, VitalsSettings};
 use crate::messages as msg;
 use crate::storage::{CharacterData, Vitals};
+use crate::world::World;
 
 const COUNT: usize = 5;
 const LIFE: usize = 0;
@@ -27,6 +28,9 @@ const CLIENT_ORDER: [usize; COUNT] = [LIFE, RADIATION, STAMINA, FOOD, WATER];
 pub fn for_client<T: Copy>(values: [T; COUNT]) -> [T; COUNT] {
     CLIENT_ORDER.map(|index| values[index])
 }
+
+const CLOTHING_BAG: i32 = 60;
+const SUIT_KIND: i32 = 33;
 
 const FOOD_KIND: i32 = 21;
 const DRINK_KIND: i32 = 22;
@@ -72,7 +76,9 @@ pub fn full(progression: &ProgressionSettings, level: i32) -> Vitals {
 
 struct Passing {
     seconds: f32,
+    /// Radiation and aggressive environment that get through the suit.
     radiation: f32,
+    aggression: f32,
     resting: bool,
 }
 
@@ -81,9 +87,10 @@ fn advance(settings: &VitalsSettings, maxima: &[f32; COUNT], vitals: &mut Vitals
     let minutes = seconds / 60.0;
     let values = &mut vitals.values;
 
+    let hunger = 1.0 + (passing.radiation + passing.aggression) * settings.environment_hunger_percent / 100.0;
     let thirst = if values[FOOD] <= 0.0 { settings.no_food_water_factor } else { 1.0 };
-    values[WATER] -= settings.water_per_minute * thirst * minutes;
-    values[FOOD] -= settings.food_per_minute * minutes;
+    values[WATER] -= settings.water_per_minute * thirst * hunger * minutes;
+    values[FOOD] -= settings.food_per_minute * hunger * minutes;
     values[RADIATION] -= passing.radiation * settings.radiation_per_minute_per_point * minutes;
     if values[WATER] <= 0.0 {
         values[LIFE] -= settings.no_water_life_per_second * seconds;
@@ -104,17 +111,51 @@ fn keep_in_range(maxima: &[f32; COUNT], vitals: &mut Vitals) {
     }
 }
 
-/// Radiation where the character stands: the top of the base's range at night,
-/// the bottom by day, nothing inside a base.
-fn background(conn: &Conn, location: i32) -> f32 {
+/// Radiation and aggressive environment where the character stands: the top
+/// of the base's range at night, the bottom by day, nothing inside a base.
+fn background(conn: &Conn, location: i32) -> [f32; 2] {
     let settings = &conn.world.settings;
     let Some(base) = travel::base_of(&settings.bases, location) else {
-        return 0.0;
+        return [0.0; 2];
     };
-    let Some([low, high]) = settings.vitals.radiation.get(&base) else {
-        return 0.0;
-    };
-    if fishing::is_night(&settings.fishing) { *high } else { *low }
+    let night = fishing::is_night(&settings.fishing);
+    let at = |table: &BTreeMap<i32, [f32; 2]>| table.get(&base).map_or(0.0, |[low, high]| if night { *high } else { *low });
+    [at(&settings.vitals.radiation), at(&settings.vitals.aggression)]
+}
+
+/// The worn suit's protection from radiation and aggressive environment: the
+/// first two numbers of its `basePar` (the client's «wpn_dress1», «wpn_dress2»).
+pub fn protection(world: &World, character: &CharacterData) -> [f32; 2] {
+    character
+        .items
+        .iter()
+        .filter(|item| item.bag == CLOTHING_BAG && world.catalog.get(item.template).is_some_and(|template| template.kind == SUIT_KIND))
+        .map(|item| scripts::base_par(&inventory::item_xml(world, item)))
+        .fold([0.0; 2], |best, [radiation, aggression, _]| [best[0].max(radiation as f32), best[1].max(aggression as f32)])
+}
+
+/// What gets through a suit (guide 1102257736): all above its protection and
+/// a third of the rest, «Р-Зщ=ПР, Зщ/3=ОР, ПР+ОР=ОУ; если Зщ больше Р, ОУ=Р/3».
+pub fn felt(level: f32, protection: f32) -> f32 {
+    (level - protection).max(0.0) + level.min(protection) / 3.0
+}
+
+/// Case 1001 when the location's numbers change. The weather in it stays
+/// clear: the server has none of its own.
+async fn show_environment(conn: &Conn, player: &mut Player, levels: [f32; 2]) -> Result<()> {
+    let shown = levels.map(|level| level.round() as i32);
+    if player.environment == Some(shown) {
+        return Ok(());
+    }
+    player.environment = Some(shown);
+    let mut w = AfcWriter::new();
+    for _ in 0..5 {
+        w.single(0.0);
+    }
+    w.int32(shown[0]).int32(shown[1]);
+    conn.send(msg::WEATHER, w.finish()).await?;
+    conn.log(&format!("   -> 1001 radiation {}, aggressive environment {}", shown[0], shown[1]));
+    Ok(())
 }
 
 /// Runs off the client's regular traffic, so it stops when the client does.
@@ -133,11 +174,15 @@ pub async fn tick(session: &mut Session) -> Result<()> {
     }
     player.last_tick = Instant::now();
 
+    let levels = background(conn, player.location);
+    let [radiation, aggression] = protection(&conn.world, &player.data);
     let passing = Passing {
         seconds,
-        radiation: background(conn, player.location),
+        radiation: felt(levels[0], radiation),
+        aggression: felt(levels[1], aggression),
         resting: player.last_active.elapsed().as_secs_f32() >= settings.vitals.rest_after_seconds,
     };
+    show_environment(conn, player, levels).await?;
     let limits = limits(settings, &conn.world.catalog, &player.data);
     if let Some(vitals) = player.data.vitals.as_mut() {
         advance(&settings.vitals, &limits, vitals, &passing);
@@ -287,8 +332,11 @@ mod tests {
             work_points_per_kg: 1.0,
             max_work_points: 3000.0,
             radiation: Default::default(),
+            aggression: Default::default(),
+            environment_hunger_percent: 1.0,
         }
     }
+
 
     const LIMITS: [f32; COUNT] = [100.0; COUNT];
 
@@ -298,7 +346,7 @@ mod tests {
 
     fn after_a_minute(start: [f32; COUNT], radiation: f32, resting: bool) -> Vitals {
         let mut vitals = vitals(start);
-        advance(&settings(), &LIMITS, &mut vitals, &Passing { seconds: 60.0, radiation, resting });
+        advance(&settings(), &LIMITS, &mut vitals, &Passing { seconds: 60.0, radiation, aggression: 0.0, resting });
         vitals
     }
 
@@ -330,6 +378,21 @@ mod tests {
         assert_eq!(after_a_minute([100.0, 50.0, 100.0, 80.0, 100.0], 0.0, true).values[STAMINA], 56.0);
         assert_eq!(after_a_minute([100.0, 50.0, 100.0, 20.0, 100.0], 0.0, true).values[STAMINA], 50.0);
         assert_eq!(after_a_minute([100.0, 50.0, 100.0, 80.0, 100.0], 0.0, false).values[STAMINA], 50.0);
+    }
+
+    #[test]
+    fn a_suit_lets_through_what_is_above_it_and_a_third_of_the_rest() {
+        // The guide's example: 60/30 in a 40/40 suit is 33.3 radiation and 10 aggressive.
+        assert!((felt(60.0, 40.0) - 33.333).abs() < 0.01);
+        assert!((felt(30.0, 40.0) - 10.0).abs() < 0.01);
+        assert_eq!(felt(50.0, 0.0), 50.0);
+    }
+
+    #[test]
+    fn the_environment_makes_one_hungry_and_thirsty() {
+        let mut vitals = vitals([100.0; COUNT]);
+        advance(&settings(), &LIMITS, &mut vitals, &Passing { seconds: 60.0, radiation: 0.0, aggression: 100.0, resting: false });
+        assert_eq!((vitals.values[FOOD], vitals.values[WATER]), (98.0, 98.0));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use rand::random;
 
 use std::collections::BTreeMap;
 
-use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
+use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, chat, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishTable, FishingSettings, ProgressionSettings, Settings, Species, TraitSettings};
 use crate::storage::CharacterData;
@@ -176,6 +176,17 @@ fn tackle_limit(test_of: &dyn Fn(&ItemEntry) -> Option<f64>, items: &[ItemEntry]
     tackle_limit_in(test_of, items, bag, factor)
 }
 
+/// How often the chat says again that match tackle needs «Матч».
+const MATCH_WARNING_SECONDS: u64 = 60;
+
+/// Whether the rod the bait is on has a piece of match tackle.
+fn needs_match(settings: &FishingSettings, items: &[ItemEntry], bait_item: i64) -> bool {
+    let Some(bag) = items.iter().find(|item| item.id == bait_item).map(|item| item.bag) else {
+        return false;
+    };
+    settings.match_perk > 0 && items.iter().any(|item| item.bag == bag && settings.match_items.contains(&item.template))
+}
+
 /// A piece's test, from its description as the client sees it.
 pub(super) fn test_of(world: &World, item: &ItemEntry) -> Option<f64> {
     test_kg(&inventory::item_xml(world, item))
@@ -303,6 +314,16 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     if bait.is_none() {
         // The client keeps the last piece on the rod after the server used it up.
         conn.log(&format!("   no bait: item {bait_id} is gone"));
+        let mut w = AfcWriter::new();
+        w.boolean(false).single(0.0);
+        conn.send(msg::BITE, w.finish()).await?;
+        return Ok(Outcome::Answered);
+    }
+    if needs_match(settings, &player.data.items, bait_id) && perks::level_of(conn, player, settings.match_perk) == 0 {
+        if player.match_warned.is_none_or(|at| at.elapsed().as_secs() >= MATCH_WARNING_SECONDS) {
+            player.match_warned = Some(std::time::Instant::now());
+            chat::system(conn, "Для матчевых снастей нужен навык «Матч».").await?;
+        }
         let mut w = AfcWriter::new();
         w.boolean(false).single(0.0);
         conn.send(msg::BITE, w.finish()).await?;
@@ -515,6 +536,8 @@ mod tests {
             max_stamina: 60.0,
             hardy_stamina_factor: 1.4,
             tackle_weight_factor: 1.5,
+            match_perk: 195,
+            match_items: vec![1376],
             traits: vec![],
         }
     }

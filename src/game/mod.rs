@@ -117,6 +117,10 @@ pub struct Player {
     /// The dialog file whose window is open; the client's answers do not say.
     pub dialog: Option<i32>,
     pub last_tick: Instant,
+    /// Radiation and aggressive environment last shown on the bottom panel.
+    pub environment: Option<[i32; 2]>,
+    /// When the character was last told match tackle needs «Матч».
+    pub match_warned: Option<Instant>,
     pub last_save: Instant,
     pub last_active: Instant,
     /// VIP skill experience earned online and not handed out yet.
@@ -156,6 +160,8 @@ impl Player {
             rod_kinds: HashMap::new(),
             dialog: None,
             last_tick: now,
+            environment: None,
+            match_warned: None,
             last_save: now,
             last_active: now,
             vip_skill_points: 0.0,
