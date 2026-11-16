@@ -480,8 +480,10 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let record = if is_record { settings.progression.record_experience_factor } else { 1 };
     let multiplier = f64::from(record) * vip::multiplier(&player.data, settings.vip.experience_percent);
     let experience = fish.experience;
-    // "Без квеста" in the catch window sends 1136; record fish go to no task.
-    let for_tasks = (message.id == msg::FISH_KEPT && !is_record).then(|| fish.clone());
+    // "Без квеста" in the catch window sends 1136. The board takes the fish it
+    // counts, so a record fish goes to none of its tasks (update 139); an NPC's
+    // quest leaves the fish in the keepnet and counts it like any other.
+    let for_tasks = (message.id == msg::FISH_KEPT).then(|| fish.clone());
     player.data.fish.push(fish);
 
     let mut w = AfcWriter::new();
@@ -491,7 +493,9 @@ pub async fn kept(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     character::award_experience(conn, player, experience, multiplier).await?;
     conn.log(&format!("   -> 1135 kept fish {id}, record: {is_record}"));
     if let Some(fish) = for_tasks {
-        board::fish_kept(conn, player, &fish).await?;
+        if !is_record {
+            board::fish_kept(conn, player, &fish).await?;
+        }
         quests::fish_kept(conn, player, &fish, rod_kind).await?;
     }
     Ok(Outcome::Answered)
