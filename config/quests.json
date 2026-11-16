@@ -36,6 +36,25 @@
   // -10% за поездку — из диалога. Карта на эту локацию не пускает.
   "boat": { "base": 4, "npc": 3, "dialog": 11, "location": 44, "fuelItem": 1170, "fuelPercent": 20, "token": 1336, "tripPercent": 10 },
 
+  // Значки над NPC: клиент сам рисует «!», когда квестовое значение NPC равно числу из сцены
+  // (Icon_QVar / Icon_QVarValue; нет значения — 0), галочку — пока в списке незаконченная строка,
+  // которую этот NPC ждёт (qTaskInteres: «Поговорить с Василичем», «Вернуться к Лизе»...), «?» —
+  // пока с собой то, что он берёт (Генератор — биотопливо). Сервер шлёт значение для «!», когда у
+  // цепочки есть новое задание или разговор; сдачу показывает галочка: строка шага "report"
+  // (номер в разделе цепочки в QTask.xml) встаёт в список, когда задания шага выполнены.
+  // Ключи и числа — из сцен клиента; у Доктора, Гоги, терминала С.П.А.С. и кубика Steam заданий
+  // нет, их «!» гасится.
+  "icons": {
+    "q1_vasil": { "chain": "vasil", "show": 1 },     // Василич, Убежище
+    "q10_say": { "chain": "lisa", "show": 10 },      // Лиза, Пустошь
+    "q12_part": { "chain": "spin", "show": 0 },      // Паша, Озеро Кулгу
+    "act_prof_100": { "chain": "kardan", "show": 0 }, // Паша, Карасиный пруд
+    "q6_doctor": { "show": 0 },
+    "q5_gogi": { "show": 0 },
+    "spas_terminal": { "show": 0 },
+    "qsteam": { "show": 0 }
+  },
+
   "chains": [
     {
       // Василич: 1.lng, раздел 1 «Развитие». Задания по текстам и строкам QTask; сколько рыбы —
@@ -49,21 +68,21 @@
           "offer": { "node": 6, "answer": 8 },
           "tasks": [ { "task": 0, "count": 10, "bait": 1018, "location": 4 } ],
           "waiting": { "node": 8, "answer": 9 },
-          "done": { "node": 9, "answer": 19 },
+          "done": { "node": 9, "answer": 19 }, "report": 1,
           "reward": { "experience": 100 }
         },
         {
           "offer": { "node": 11, "answer": 18 },
           "tasks": [ { "task": 2, "count": 10, "minGrams": 100, "maxGrams": 3000 } ],
           "waiting": { "node": 8, "answer": 9 },
-          "done": { "node": 13, "answer": 20 },
+          "done": { "node": 13, "answer": 20 }, "report": 3,
           "reward": { "experience": 100 }
         },
         {
           "tasks": [ { "task": 4, "kind": "make", "item": 1167, "count": 2 } ],
           "waiting": { "node": 8, "answer": 9 },
           // «Держи рецепт биотоплива»
-          "done": { "node": 16, "answer": 21 },
+          "done": { "node": 16, "answer": 21 }, "report": 5,
           "reward": { "items": [[1173, 1]] }
         },
         {
@@ -72,7 +91,7 @@
             { "task": 7, "kind": "pour", "count": 1 }
           ],
           "waiting": { "node": 8, "answer": 9 },
-          "done": { "node": 18, "answer": 22 },
+          "done": { "node": 18, "answer": 22 }, "report": 8,
           "reward": { "experience": 200 }
         },
         // «Поговорить с Жекой» в его разделе; дальше Василич ждёт, пока Жека не закончит.
@@ -86,7 +105,7 @@
             { "task": 13, "species": 37, "trophy": true, "base": 1 }
           ],
           "waiting": { "node": 8, "answer": 9 },
-          "done": { "node": 22, "answer": 33 },
+          "done": { "node": 22, "answer": 33 }, "report": 14,
           "reward": { "items": [[1274, 1]], "experience": 500 }
         },
         // «Привет Искателю от Василича. Пустоши»
@@ -107,7 +126,7 @@
           "requires": "vasil:4",
           "offer": { "node": 2, "answer": 2 },
           "tasks": [ { "task": 2, "species": 84, "count": 10 } ],
-          "done": { "node": 5, "answer": 4 },
+          "done": { "node": 5, "answer": 4 }, "report": 3,
           "reward": { "items": [[1161, 1]] }
         },
         {
@@ -117,7 +136,7 @@
             { "task": 4, "species": 131, "count": 15 },
             { "task": 5, "kind": "make", "item": 1160, "count": 1 }
           ],
-          "done": { "node": 9, "answer": 7 },
+          "done": { "node": 9, "answer": 7 }, "report": 7,
           "reward": { "recipes": [501, 502], "items": [[1163, 20]] }
         },
         {
@@ -127,7 +146,7 @@
             { "task": 9, "kind": "make", "item": 1154, "count": 1 },
             { "task": 10, "kind": "make", "item": 1155, "count": 1 }
           ],
-          "done": { "node": 18, "answer": 10 },
+          "done": { "node": 18, "answer": 10 }, "report": 12,
           "reward": { "items": [[1153, 1]] }
         },
         {
@@ -136,12 +155,12 @@
             { "task": 17, "kind": "make", "item": 1219, "count": 1 },
             { "task": 18, "kind": "make", "item": 1220, "count": 1 }
           ],
-          "done": { "node": 23, "answer": 20 }
+          "done": { "node": 23, "answer": 20 }, "report": 15
         },
         {
           "tasks": [ { "task": 13, "kind": "have", "item": 1230, "count": 1 } ],
           "waiting": { "node": 24, "answer": 9 },
-          "done": { "node": 25, "answer": 21 },
+          "done": { "node": 25, "answer": 21 }, "report": 16,
           "reward": { "recipes": [503, 504], "items": [[1276, 1]] }
         },
         { "tasks": [ { "task": 10, "category": 1, "kind": "talk", "dialog": 1 } ] }
@@ -206,7 +225,7 @@
           "offer": { "node": 2, "answer": 4 },
           "tasks": [ { "task": 1, "species": 122, "trophy": true, "count": 4 } ],
           "waiting": { "node": 3, "answer": 5 },
-          "done": { "node": 5, "answer": 11 },
+          "done": { "node": 5, "answer": 11 }, "report": 2,
           "reward": { "items": [[1277, 1]], "reputation": [[1003, 510]] }
         },
         { "done": { "node": 6, "answer": 12 }, "reward": { "flags": ["spas_unique"] } },
@@ -214,7 +233,7 @@
           "offer": { "node": 7, "answer": 4 },
           "tasks": [ { "task": 3, "minGrams": 10000, "count": 5 } ],
           "waiting": { "node": 3, "answer": 5 },
-          "done": { "node": 8, "answer": 11 },
+          "done": { "node": 8, "answer": 11 }, "report": 4,
           "reward": { "items": [[1381, 1]], "reputation": [[1003, 510]] }
         }
       ]
@@ -241,7 +260,7 @@
             { "task": 5, "species": 95, "count": 15, "rodKind": 3 }
           ],
           "waiting": { "node": 5, "answer": 12 },
-          "done": { "node": 6, "answer": 13 },
+          "done": { "node": 6, "answer": 13 }, "report": 6,
           "reward": { "items": [[1400, 1]], "reputation": [[1002, 500]] }
         },
         { "done": { "node": 7, "answer": 5 } },
@@ -255,7 +274,7 @@
             { "task": 10, "species": 128, "trophy": true, "count": 5, "rodKind": 3 }
           ],
           "waiting": { "node": 11, "answer": 14 },
-          "done": { "node": 12, "answer": 9 },
+          "done": { "node": 12, "answer": 9 }, "report": 12,
           "reward": { "items": [[1401, 1]], "reputation": [[1002, 500]] }
         },
         { "done": { "node": 13, "answer": 10 } },
@@ -279,7 +298,7 @@
             { "task": 18, "species": 33, "trophy": true, "bait": 1095, "count": 1 }
           ],
           "waiting": { "node": 25, "answer": 22 },
-          "done": { "node": 24, "answer": 23 },
+          "done": { "node": 24, "answer": 23 }, "report": 19,
           "reward": { "items": [[1411, 1]], "reputation": [[1002, 500]] }
         }
       ]

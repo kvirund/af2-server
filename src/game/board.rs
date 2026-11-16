@@ -337,7 +337,7 @@ pub async fn enter(conn: &Conn, player: &mut Player) -> Result<()> {
     send_reputation_levels(conn, player).await?;
     send_tasks(conn, msg::TASKS, &player.data.board_tasks.iter().collect::<Vec<_>>()).await?;
     conn.log(&format!("   -> 15 replev, 675 {} task(s)", player.data.board_tasks.len()));
-    Ok(())
+    super::quests::refresh(conn, player).await
 }
 
 /// Client 700 int tab.

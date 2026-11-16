@@ -8,6 +8,8 @@
 //! chain's place is the quest value `quest_<name>` (steps rewarded) and
 //! `quest_<name>_on` (the current step's tasks taken).
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use chrono::Utc;
 
@@ -232,13 +234,43 @@ pub(super) fn reward_fits(conn: &Conn, player: &Player, reward: &QuestReward) ->
     })
 }
 
+fn is_report(chain: &QuestChain, step: &QuestStep, task: &BoardTask) -> bool {
+    step.report > 0 && task.category == chain.category && task.task == step.report
+}
+
+fn has_report(character: &CharacterData, chain: &QuestChain, step: &QuestStep) -> bool {
+    character.board_tasks.iter().any(|task| is_report(chain, step, task))
+}
+
+/// The tasks are done: «Поговорить с ...» joins the list.
+async fn add_report(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()> {
+    let settings = &conn.world.settings.quests;
+    let chain = &settings.chains[chain_index];
+    let step = &chain.steps[step_of(&player.data, chain)];
+    let line = BoardTask {
+        id: conn.world.store.next_id().await?,
+        category: chain.category,
+        task: step.report,
+        kind: FISH,
+        target: 1,
+        ..Default::default()
+    };
+    player.data.board_tasks.push(line.clone());
+    conn.save(player).await?;
+    board::send_tasks(conn, msg::TASK_UPDATES, &[&line]).await?;
+    board::send_events(conn, &[(TAKEN, line.id)]).await?;
+    conn.log(&format!("   -> 680 quest {}: report line {}/{}", chain.name, chain.category, step.report));
+    Ok(())
+}
+
 /// Gives the reward, drops the step's lines and moves on.
 async fn reward(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()> {
     let world = conn.world.clone();
     let chain = &world.settings.quests.chains[chain_index];
     let index = step_of(&player.data, chain);
     let step = &chain.steps[index];
-    let gone: Vec<i64> = lines_of(&player.data, chain, step).map(|task| task.id).collect();
+    let mut gone: Vec<i64> = lines_of(&player.data, chain, step).map(|task| task.id).collect();
+    gone.extend(player.data.board_tasks.iter().filter(|task| is_report(chain, step, task)).map(|task| task.id));
     player.data.board_tasks.retain(|task| !gone.contains(&task.id));
     board::send_events(conn, &gone.iter().map(|id| (REMOVE, *id)).collect::<Vec<_>>()).await?;
     player.data.quest_values.insert(step_key(chain), index as i32 + 1);
@@ -317,12 +349,72 @@ async fn settle(conn: &Conn, player: &mut Player) -> Result<()> {
             } else if taken && step.done.is_none() && tasks_done(&player.data, chain, step) {
                 reward(conn, player, index).await?;
                 moved = true;
+            } else if taken && step.done.is_some() && tasks_done(&player.data, chain, step) && step.report > 0 && !has_report(&player.data, chain, step) {
+                add_report(conn, player, index).await?;
+                moved = true;
             }
         }
         if !moved {
-            return Ok(());
+            return send_icons(conn, player).await;
         }
     }
+}
+
+/// Whether the chain's NPC has something new to say: a step to offer, or a
+/// page with no tasks before it. Done tasks with a report line show the
+/// client's check mark instead; done tasks without one light the «!» too.
+fn has_news(settings: &QuestSettings, character: &CharacterData, chain: &QuestChain) -> bool {
+    let Some(step) = chain.steps.get(step_of(character, chain)) else {
+        return false;
+    };
+    if !may_begin(settings, character, step) {
+        return false;
+    }
+    let taken = value(character, &taken_key(chain)) > 0;
+    let ready = taken && step.done.is_some() && tasks_done(character, chain, step);
+    (!taken && step.offer.is_some()) || (ready && (step.tasks.is_empty() || step.report == 0))
+}
+
+/// On entering the game: steps due and report lines for tasks done before
+/// these existed, then the icons.
+pub async fn refresh(conn: &Conn, player: &mut Player) -> Result<()> {
+    player.icons.clear();
+    settle(conn, player).await
+}
+
+/// The value of each icon key: the one that lights the NPC's «!», or another.
+fn icon_values(settings: &QuestSettings, character: &CharacterData) -> BTreeMap<String, i64> {
+    settings
+        .icons
+        .iter()
+        .map(|(key, rule)| {
+            let lit = settings.chains.iter().find(|chain| chain.name == rule.chain).is_some_and(|chain| has_news(settings, character, chain));
+            (key.clone(), if lit { rule.show } else { rule.show + 1 })
+        })
+        .collect()
+}
+
+/// Case 15 with the icon keys that changed. The client draws the icons over
+/// the NPCs itself, once a second (`NPC.ALFPGAOOBBB`): «!» when the key has the
+/// NPC's value (a missing key reads 0), a check mark while one of its tasks is
+/// in the list unfinished, «?» while the character holds what it takes.
+pub async fn send_icons(conn: &Conn, player: &mut Player) -> Result<()> {
+    let values = icon_values(&conn.world.settings.quests, &player.data);
+    let mut w = AfcWriter::new();
+    let mut changed = Vec::new();
+    for (key, value) in &values {
+        if player.icons.get(key) != Some(value) {
+            w.string(key).int64(*value);
+            changed.push(format!("{key}={value}"));
+        }
+    }
+    if changed.is_empty() {
+        return Ok(());
+    }
+    player.icons = values;
+    conn.send(msg::USER_PARAMS, w.finish()).await?;
+    conn.log(&format!("   -> 15 NPC icons {}", changed.join(" ")));
+    Ok(())
 }
 
 /// What the client shows for a page or answer its dialog file leaves empty.
@@ -665,12 +757,37 @@ mod tests {
                 for spec in &step.tasks {
                     assert!(seen.insert((category_of(chain, spec), spec.task)), "{} {}/{}", chain.name, category_of(chain, spec), spec.task);
                 }
+                if step.report > 0 {
+                    assert!(seen.insert((chain.category, step.report)), "{} report {}", chain.name, step.report);
+                }
                 if let Some(wanted) = &step.requires {
                     let name = wanted.split(':').next().unwrap_or_default();
                     assert!(settings.chains.iter().any(|chain| chain.name == name), "{name}");
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_icons_name_chains_that_exist() {
+        let text = std::fs::read_to_string("config/quests.json").expect("config/quests.json");
+        let settings: QuestSettings = json_comments_parse(&text);
+        for (key, rule) in &settings.icons {
+            assert!(rule.chain.is_empty() || settings.chains.iter().any(|chain| chain.name == rule.chain), "{key}: {}", rule.chain);
+        }
+    }
+
+    #[test]
+    fn an_npc_with_something_to_offer_lights_its_icon() {
+        let text = std::fs::read_to_string("config/quests.json").expect("config/quests.json");
+        let settings: QuestSettings = json_comments_parse(&text);
+        let mut character = CharacterData::default();
+        let fresh = icon_values(&settings, &character);
+        assert_eq!(fresh["q1_vasil"], 1, "Василич offers his first step");
+        assert_eq!(fresh["q6_doctor"], 1, "the doctor has nothing: anything but 0");
+        let vasil = settings.chains.iter().find(|chain| chain.name == "vasil").unwrap();
+        character.quest_values.insert(step_key(vasil), vasil.steps.len() as i32);
+        assert_eq!(icon_values(&settings, &character)["q1_vasil"], 2, "nothing left");
     }
 
     fn json_comments_parse(text: &str) -> QuestSettings {

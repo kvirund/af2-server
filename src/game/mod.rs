@@ -123,6 +123,8 @@ pub struct Player {
     pub vip_skill_points: f64,
     pub last_vip_tick: Instant,
     pub last_title_check: Instant,
+    /// The NPC icon values last sent (case 15), so only changes go again.
+    pub icons: BTreeMap<String, i64>,
     /// Life ran out and the client has not asked to come back yet.
     pub dead: bool,
     /// The last cast at each location this session, for the web pages.
@@ -159,6 +161,7 @@ impl Player {
             vip_skill_points: 0.0,
             last_vip_tick: now,
             last_title_check: now,
+            icons: BTreeMap::new(),
             dead: false,
             casts: BTreeMap::new(),
         }

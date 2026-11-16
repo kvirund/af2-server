@@ -459,6 +459,19 @@ pub struct QuestSettings {
     pub tournaments: Vec<Tournament>,
     #[serde(default)]
     pub titles: TitleSettings,
+    /// The quest values the NPCs of the scenes watch for their «!»: key →
+    /// the chain and the value that lights it.
+    #[serde(default)]
+    pub icons: BTreeMap<String, IconRule>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IconRule {
+    /// Empty: an NPC with nothing to give here, never lit.
+    #[serde(default)]
+    pub chain: String,
+    pub show: i64,
 }
 
 /// Titles (the card's titles tab, client `Titul.xml`): which are earned how,
@@ -658,6 +671,11 @@ pub struct QuestStep {
     /// The done page lists fish with this trait; the answer takes one.
     #[serde(default)]
     pub deliver_trait: i32,
+    /// A line «Поговорить с ...» of the chain's category (QTask.xml) that joins
+    /// the list once the tasks are done and goes with the reward: the NPC's
+    /// check mark watches for it.
+    #[serde(default)]
+    pub report: i32,
     /// Another chain that has to be finished first.
     #[serde(default)]
     pub requires: Option<String>,
