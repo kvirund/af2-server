@@ -48,9 +48,12 @@ pub fn base_faction(settings: &ReputationSettings, base: i32) -> Option<i32> {
 /// A share of a chance or an amount, raised by `percent` for each level of the
 /// reputation with the base the character is at.
 pub fn base_bonus(settings: &Settings, player: &Player, percent: f64) -> f64 {
+    base_bonus_at(settings, &player.data, travel::current_base(settings, player), percent)
+}
+
+pub fn base_bonus_at(settings: &Settings, character: &CharacterData, base: i32, percent: f64) -> f64 {
     let reputation = &settings.reputation;
-    let base = travel::current_base(settings, player);
-    let level = base_faction(reputation, base).map_or(0, |faction| level_with(reputation, &player.data, faction));
+    let level = base_faction(reputation, base).map_or(0, |faction| level_with(reputation, character, faction));
     1.0 + percent / 100.0 * f64::from(level)
 }
 

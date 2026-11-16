@@ -125,6 +125,19 @@ pub struct Player {
     pub last_title_check: Instant,
     /// Life ran out and the client has not asked to come back yet.
     pub dead: bool,
+    /// The last cast at each location this session, for the web pages.
+    pub casts: BTreeMap<i32, LastCast>,
+}
+
+/// Where the bait went last time at a location.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct LastCast {
+    pub depth: f64,
+    pub bottom: f64,
+    /// The bait's template, 0 for none.
+    pub bait: i32,
+    /// Unix seconds.
+    pub at: i64,
 }
 
 impl Player {
@@ -147,6 +160,7 @@ impl Player {
             last_vip_tick: now,
             last_title_check: now,
             dead: false,
+            casts: BTreeMap::new(),
         }
     }
 }

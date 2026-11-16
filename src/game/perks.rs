@@ -101,7 +101,11 @@ fn effects_of(settings: &AttributeSettings, attributes: &[i32; 8]) -> Effects {
 }
 
 pub fn effects(conn: &Conn, player: &Player) -> Effects {
-    effects_of(&conn.world.settings.attributes, &attributes(&levels_of(conn, player)))
+    effects_for(&conn.world.settings, &conn.world.catalog, &player.data)
+}
+
+pub fn effects_for(settings: &Settings, catalog: &Catalog, character: &CharacterData) -> Effects {
+    effects_of(&settings.attributes, &attributes(&levels(settings, catalog, character)))
 }
 
 /// A skill's level with everything that adds to it.

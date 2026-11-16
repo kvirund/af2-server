@@ -10,9 +10,13 @@ use anyhow::Result;
 use chrono::{Local, Timelike};
 use rand::random;
 
-use super::{Bite, Outcome, Session, active, board, cards, character, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, vip, vitals, perks};
+use std::collections::BTreeMap;
+
+use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
-use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Species, TraitSettings};
+use crate::config::{Catalog, FishTable, FishingSettings, ProgressionSettings, Settings, Species, TraitSettings};
+use crate::storage::CharacterData;
+use crate::world::World;
 use crate::messages as msg;
 use crate::storage::{CaughtFish, ItemEntry, Record, UNKNOWN_BAIT};
 
@@ -37,6 +41,53 @@ pub(super) fn is_night(settings: &FishingSettings) -> bool {
     let hours = f64::from(now.num_seconds_from_midnight()) / 3600.0;
     let game_hour = (hours * settings.game_hours_per_real_hour) % 24.0;
     game_hour >= NIGHT_START_HOUR || game_hour < NIGHT_END_HOUR
+}
+
+/// Everything a bite depends on besides the character.
+pub struct Cast {
+    pub base: i32,
+    pub location: i32,
+    /// The bait's template.
+    pub bait: Option<i32>,
+    /// What the rod's tackle holds, in grams.
+    pub max_grams: f64,
+    pub depth: f64,
+    pub bottom: f64,
+    pub night: bool,
+}
+
+/// What one bite request can bring: the chance, and the species with their weights.
+pub struct Odds<'a> {
+    pub chance: f64,
+    pub options: Vec<(&'a Species, f64)>,
+    pub total: f64,
+    pub min_grams: f64,
+    /// The trophy share's multiplier: luck and the base's reputation.
+    pub luck: f64,
+}
+
+/// The same numbers for the bite request and the web advisor. `nibble`: this
+/// request lets small fish at the bait (`smallFishNibbleShare`).
+pub fn odds<'a>(world: &'a World, character: &CharacterData, cast: &Cast, nibble: bool) -> Odds<'a> {
+    let all = &world.settings;
+    let settings = &all.fishing;
+    let bait_item = cast.bait.and_then(|template| world.catalog.get(template));
+    let min_grams = if nibble { 0.0 } else { bait_item.map_or(0.0, |item| bait_min_grams(&item.xml)) };
+    let conditions =
+        Conditions { bait: cast.bait, min_grams, max_grams: cast.max_grams, depth: cast.depth, bottom: cast.bottom, night: cast.night };
+    let mut options = candidates(&world.fish, settings, cast.location, &conditions);
+    for (species, weight) in &mut options {
+        *weight *= cards::bite_factor(&all.mastery, &character.catches, species.id);
+    }
+    let total: f64 = options.iter().map(|(_, weight)| weight).sum();
+    let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
+    let chance = attracted(settings, chance, bait_item.map_or(1.0, |item| attractiveness(&item.xml)));
+    let levels = perks::levels(all, &world.catalog, character);
+    let chance = (chance * lure_bonus(all, &levels, bait_item.map(|item| item.xml.as_str()))).min(1.0);
+    let luck_percent = all.reputation.per_level.luck_percent;
+    let luck = perks::effects_for(all, &world.catalog, character).trophy
+        * reputation::base_bonus_at(all, character, cast.base, luck_percent);
+    Odds { chance: if options.is_empty() { 0.0 } else { chance }, options, total, min_grams, luck }
 }
 
 struct Conditions {
@@ -121,6 +172,11 @@ fn tackle_limit(catalog: &Catalog, items: &[ItemEntry], bait_item: i64, factor: 
     let Some(bag) = items.iter().find(|item| item.id == bait_item).map(|item| item.bag) else {
         return f64::INFINITY;
     };
+    tackle_limit_in(catalog, items, bag, factor)
+}
+
+/// The same for the rod in this bag.
+pub(super) fn tackle_limit_in(catalog: &Catalog, items: &[ItemEntry], bag: i32, factor: f64) -> f64 {
     if factor <= 0.0 {
         return f64::INFINITY;
     }
@@ -139,7 +195,7 @@ fn tackle_limit(catalog: &Catalog, items: &[ItemEntry], bait_item: i64, factor: 
     weakest * factor * 1000.0
 }
 
-fn size_class(species: &Species, grams: i32) -> i32 {
+pub(super) fn size_class(species: &Species, grams: i32) -> i32 {
     if grams >= species.trophy_grams {
         TROPHY_CLASS
     } else if grams >= species.large_grams {
@@ -150,7 +206,7 @@ fn size_class(species: &Species, grams: i32) -> i32 {
 }
 
 /// A fish too heavy for the tackle comes up again within what the tackle holds.
-fn fit_to_tackle(species: &Species, rolled: (i32, i32), min_grams: f64, max_grams: f64, point: f64) -> (i32, i32) {
+pub(super) fn fit_to_tackle(species: &Species, rolled: (i32, i32), min_grams: f64, max_grams: f64, point: f64) -> (i32, i32) {
     if f64::from(rolled.0) <= max_grams {
         return rolled;
     }
@@ -188,17 +244,17 @@ fn subtype(xml: &str) -> Option<i32> {
 
 /// «Джиги», «Воблеры» and «Блёсны»: each point of the skill for the lure on
 /// the rod adds `lureBitePercent` of the chance.
-fn lure_bonus(conn: &super::Conn, player: &super::Player, bait_xml: Option<&str>) -> f64 {
-    let settings = &conn.world.settings;
+fn lure_bonus(settings: &Settings, levels: &BTreeMap<i32, i32>, bait_xml: Option<&str>) -> f64 {
     let Some(perk) = bait_xml.and_then(subtype).and_then(|kind| settings.skills.lure_skills.get(&kind)) else {
         return 1.0;
     };
     let per_level = settings.skill_tree.get(*perk).map_or(0.0, |node| node.effect[0]);
-    1.0 + per_level * f64::from(perks::level_of(conn, player, *perk)) * settings.skills.lure_bite_percent / 100.0
+    let level = levels.get(perk).copied().unwrap_or(0);
+    1.0 + per_level * f64::from(level) * settings.skills.lure_bite_percent / 100.0
 }
 
 /// Returns grams and size class for two rolls in `0..1`.
-fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
+pub(super) fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
     let trophy_share = luck
         * if depth > settings.trophy_depth_cm {
             settings.trophy_share * settings.deep_trophy_multiplier
@@ -246,22 +302,12 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
         conn.send(msg::BITE, w.finish()).await?;
         return Ok(Outcome::Answered);
     }
-    let min_grams = if random::<f64>() < settings.small_fish_nibble_share {
-        0.0
-    } else {
-        bait.and_then(|template| world.catalog.get(template)).map_or(0.0, |item| bait_min_grams(&item.xml))
-    };
     let max_grams = tackle_limit(&world.catalog, &player.data.items, bait_id, settings.tackle_weight_factor);
-    let conditions = Conditions { bait, min_grams, max_grams, depth, bottom, night: is_night(settings) };
-    let mut options = candidates(&world.fish, settings, player.location, &conditions);
-    for (species, weight) in &mut options {
-        *weight *= cards::bite_factor(&world.settings.mastery, &player.data.catches, species.id);
-    }
-    let total: f64 = options.iter().map(|(_, weight)| weight).sum();
-    let bait_item = bait.and_then(|template| world.catalog.get(template));
-    let chance = settings.bite_chance * (total / settings.full_bite_weight).min(1.0);
-    let chance = attracted(settings, chance, bait_item.map_or(1.0, |item| attractiveness(&item.xml)));
-    let chance = (chance * lure_bonus(conn, player, bait_item.map(|item| item.xml.as_str()))).min(1.0);
+    let base = travel::current_base(&world.settings, player);
+    let cast = Cast { base, location: player.location, bait, max_grams, depth, bottom, night: is_night(settings) };
+    player.casts.insert(player.location, LastCast { depth, bottom, bait: bait.unwrap_or(0), at: chrono::Utc::now().timestamp() });
+    let Odds { chance, options, total, min_grams, luck } =
+        odds(world, &player.data, &cast, random::<f64>() < settings.small_fish_nibble_share);
 
     let mut w = AfcWriter::new();
     if options.is_empty() || random::<f64>() >= chance {
@@ -271,8 +317,6 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let species = pick(&options, total, random());
-    let luck_percent = world.settings.reputation.per_level.luck_percent;
-    let luck = perks::effects(conn, player).trophy * reputation::base_bonus(&world.settings, player, luck_percent);
     let rolled = roll_weight(settings, species, depth, min_grams, luck, random(), random());
     let (grams, size_class) = fit_to_tackle(species, rolled, min_grams, max_grams, random());
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
