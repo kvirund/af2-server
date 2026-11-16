@@ -33,13 +33,20 @@ const DEPTH_OFFSET: usize = 4 + 24 + 24;
 const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
 /// Cells of a rod's bag holding the rod, reel and line.
 const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
-const NIGHT_START_HOUR: f64 = 21.5;
-const NIGHT_END_HOUR: f64 = 4.5;
+pub const NIGHT_START_HOUR: f64 = 21.5;
+pub const NIGHT_END_HOUR: f64 = 4.5;
+/// The client asks for a bite this often while the bait is in the water.
+pub const BITE_REQUEST_SECONDS: f64 = 5.0;
 
-pub fn is_night(settings: &FishingSettings) -> bool {
+/// The hour of the game's day, from the server's local clock.
+pub fn game_hour(settings: &FishingSettings) -> f64 {
     let now = Local::now().time();
     let hours = f64::from(now.num_seconds_from_midnight()) / 3600.0;
-    let game_hour = (hours * settings.game_hours_per_real_hour) % 24.0;
+    (hours * settings.game_hours_per_real_hour) % 24.0
+}
+
+pub fn is_night(settings: &FishingSettings) -> bool {
+    let game_hour = game_hour(settings);
     game_hour >= NIGHT_START_HOUR || game_hour < NIGHT_END_HOUR
 }
 
@@ -232,7 +239,7 @@ pub(super) fn fit_to_tackle(species: &Species, rolled: (i32, i32), min_grams: f6
     (grams, size_class(species, grams))
 }
 
-fn bait_min_grams(xml: &str) -> f64 {
+pub(super) fn bait_min_grams(xml: &str) -> f64 {
     let class = xml
         .split_once("<basePar>")
         .and_then(|(_, rest)| rest.split('/').nth(1))

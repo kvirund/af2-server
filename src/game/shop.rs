@@ -20,7 +20,7 @@ fn minimal_level(xml: &str) -> i32 {
         .unwrap_or(1)
 }
 
-fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool {
+pub(super) fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool {
     !settings.enforce_levels || minimal_level(&item.xml) <= level
 }
 
@@ -29,6 +29,17 @@ fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogItem) -> bool
 fn reputation_short(shop: &ShopSettings, factions: &ReputationSettings, character: &CharacterData, item: &CatalogItem) -> Option<[i32; 2]> {
     let [faction, level] = *shop.stock.reputation.get(&item.id)?;
     (reputation::level_with(factions, character, faction) < level).then_some([faction, level])
+}
+
+/// Whether the base's shops sell the item.
+pub(super) fn sells(world: &crate::world::World, base: i32, template: i32) -> bool {
+    let priced = world.catalog.get(template).is_some_and(|item| item.cost > 0 || item.premium_cost > 0 || item.cost_item[0] > 0);
+    priced && world.settings.shop.stocked(base).is_none_or(|ids| ids.contains(&template))
+}
+
+/// The level an item asks for.
+pub(super) fn level_of(item: &CatalogItem) -> i32 {
+    minimal_level(&item.xml)
 }
 
 /// Priced items this character's base sells.

@@ -3,173 +3,838 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AF2 server</title>
+<title>AF2 · Советник рыбака</title>
 <style>
-  :root { --bg: #f6f6f3; --panel: #ffffff; --text: #1d1f1c; --muted: #6b6f68; --line: #dcdcd5; --accent: #2f6b4f; --bad: #a33b2b; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #161816; --panel: #1f221f; --text: #e6e7e2; --muted: #9a9e96; --line: #343832; --accent: #7cc49d; --bad: #e0806f; }
+:root {
+  color-scheme: light;
+  --bg: #f3f1ec; --surface: #ffffff; --surface-2: #f8f7f3; --sunken: #ecebe5;
+  --ink: #1a1c19; --ink-2: #4f534b; --ink-3: #868a80; --line: #e2dfd6; --line-2: #d3d0c5;
+  --accent: #1d6b58; --accent-ink: #ffffff; --accent-soft: #e2efe9; --accent-line: #b9d8cc;
+  --warn: #9a5a12; --warn-soft: #f7ecdc; --bad: #a83a2a; --bad-soft: #f6e3df;
+  --day: #b9770e; --night: #4f55c7;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948; --other: #c9c6bd;
+  --shadow: 0 1px 2px rgba(30, 28, 20, .06), 0 2px 8px rgba(30, 28, 20, .04);
+  --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111311; --surface: #191c19; --surface-2: #1f231f; --sunken: #151815;
+    --ink: #ecebe5; --ink-2: #b6b9af; --ink-3: #82867d; --line: #2b302b; --line-2: #383e38;
+    --accent: #5cc4a3; --accent-ink: #0c1f19; --accent-soft: #1b322b; --accent-line: #2c5446;
+    --warn: #e0a85a; --warn-soft: #33281a; --bad: #ea8a78; --bad-soft: #3a211d;
+    --day: #e3a640; --night: #9aa0f5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --other: #4a4f49;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3);
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
-  header { display: flex; gap: 4px; padding: 12px 16px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  header h1 { font-size: 16px; margin: 0 16px 10px 0; }
-  header button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 4px 10px 10px; font: inherit; cursor: pointer; }
-  header button.on { color: var(--text); border-color: var(--accent); }
-  main { padding: 16px; max-width: 1300px; }
-  section { display: none; }
-  section.on { display: block; }
-  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
-  label { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: 12px; }
-  select, input { font: inherit; padding: 4px 6px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px; }
-  .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
-  th { color: var(--muted); font-weight: 500; font-size: 12px; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td.species { white-space: normal; min-width: 260px; color: var(--muted); }
-  tr:last-child td { border-bottom: 0; }
-  .muted { color: var(--muted); }
-  .dead { color: var(--bad); }
-  .empty { padding: 16px; color: var(--muted); }
-  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111311; --surface: #191c19; --surface-2: #1f231f; --sunken: #151815;
+  --ink: #ecebe5; --ink-2: #b6b9af; --ink-3: #82867d; --line: #2b302b; --line-2: #383e38;
+  --accent: #5cc4a3; --accent-ink: #0c1f19; --accent-soft: #1b322b; --accent-line: #2c5446;
+  --warn: #e0a85a; --warn-soft: #33281a; --bad: #ea8a78; --bad-soft: #3a211d;
+  --day: #e3a640; --night: #9aa0f5;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --other: #4a4f49;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+svg.i { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-3); }
+
+/* Layout */
+.app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.side { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 20px 14px; border-right: 1px solid var(--line); background: var(--surface-2); }
+.brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 18px; }
+.brand-mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); }
+.brand-mark svg { width: 20px; height: 20px; }
+.brand b { display: block; font-size: 15px; letter-spacing: .01em; }
+.brand span { display: block; font-size: 12px; color: var(--ink-3); }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; color: var(--ink-2); text-decoration: none; font-weight: 500; }
+.nav a:hover { background: var(--sunken); color: var(--ink); }
+.nav a.on { background: var(--accent-soft); color: var(--accent); }
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+.clock { padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.clock-row { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.clock-row .i { width: 16px; height: 16px; }
+.clock small { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.is-day { color: var(--day); }
+.is-night { color: var(--night); }
+.theme { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--sunken); }
+.theme button { flex: 1; border: 0; background: none; padding: 4px; border-radius: 7px; cursor: pointer; color: var(--ink-3); font-size: 12px; }
+.theme button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+main { min-width: 0; padding: 24px 32px 48px; max-width: 1240px; }
+.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.top h1 { margin: 0; font-size: 24px; line-height: 1.2; letter-spacing: -.01em; }
+.top p { margin: 4px 0 0; color: var(--ink-2); max-width: 640px; }
+.who { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; position: relative; }
+.avatar.online::after { content: ""; position: absolute; right: -1px; bottom: -1px; width: 10px; height: 10px; border-radius: 50%; background: #2fa36b; border: 2px solid var(--surface); }
+.who select { border: 0; background: none; font-weight: 600; padding: 2px 22px 2px 2px; cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%); background-position: calc(100% - 9px) 50%, calc(100% - 4px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+.who small { display: block; color: var(--ink-3); font-size: 12px; padding-left: 2px; }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 12px; margin-bottom: 20px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.filter { display: flex; align-items: center; gap: 8px; }
+.filter > span { font-size: 12px; color: var(--ink-3); font-weight: 500; }
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--sunken); gap: 2px; }
+.seg button { border: 0; background: none; padding: 5px 10px; border-radius: 7px; cursor: pointer; color: var(--ink-2); white-space: nowrap; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-weight: 600; }
+.seg .i { width: 14px; height: 14px; }
+.pick { border: 1px solid var(--line-2); background: var(--surface); border-radius: 9px; padding: 6px 28px 6px 10px; cursor: pointer; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%); background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; font-size: 13px; }
+.search { position: relative; flex: 1; min-width: 200px; max-width: 360px; }
+.search input { width: 100%; padding: 8px 12px 8px 34px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); }
+.search input:focus, .pick:focus, .num-input:focus { outline: 2px solid var(--accent-line); outline-offset: 0; border-color: var(--accent); }
+.search .i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-3); width: 16px; height: 16px; }
+.num-input { width: 64px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); text-align: right; }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 28px 0 10px; }
+.section-title h2 { margin: 0; font-size: 16px; }
+.section-title span { color: var(--ink-3); font-size: 13px; }
+
+.goals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.goal { text-align: left; padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); transition: border-color .15s; }
+.goal:hover { border-color: var(--line-2); }
+.goal.on { border-color: var(--accent); background: var(--accent-soft); }
+.goal-head { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-weight: 600; font-size: 13px; }
+.goal.on .goal-head { color: var(--accent); }
+.goal-value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+.goal-value small { font-size: 13px; font-weight: 500; color: var(--ink-3); margin-left: 4px; letter-spacing: 0; }
+.goal-where { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Option rows */
+.list { display: flex; flex-direction: column; gap: 8px; }
+.opt { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 32px; gap: 4px 14px; align-items: center; padding: 14px 14px 14px 12px; }
+.opt.open { border-color: var(--line-2); }
+.rank { font-size: 13px; color: var(--ink-3); font-weight: 600; text-align: center; align-self: start; padding-top: 2px; }
+.opt.best .rank { color: var(--accent); }
+.opt-title { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.opt-title b { font-size: 15px; }
+.opt-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 4px; color: var(--ink-2); font-size: 13px; }
+.dot-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); }
+.stats { display: grid; grid-auto-flow: column; grid-auto-columns: 92px; gap: 6px; }
+.stat { text-align: right; }
+.stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 11px; color: var(--ink-3); text-transform: lowercase; }
+.stat.lead b { color: var(--accent); font-size: 17px; }
+.more { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; display: grid; place-items: center; color: var(--ink-2); }
+.more:hover { background: var(--sunken); }
+.more .i { width: 16px; height: 16px; transition: transform .15s; }
+.opt.open .more .i { transform: rotate(180deg); }
+.catch { grid-column: 2 / 4; display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.detail { grid-column: 1 / -1; display: none; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.opt.open .detail { display: block; }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--sunken); color: var(--ink-2); white-space: nowrap; text-decoration: none; border: 1px solid transparent; }
+a.chip:hover { border-color: var(--line-2); color: var(--ink); }
+.chip.have { background: var(--accent-soft); color: var(--accent); }
+.chip.shop { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip .i { width: 13px; height: 13px; }
+.time-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.time-tag .i { width: 14px; height: 14px; }
+
+/* Catch bar */
+.bar { display: flex; gap: 2px; height: 10px; border-radius: 4px; overflow: hidden; background: var(--sunken); }
+.bar i { display: block; height: 100%; min-width: 3px; }
+.bar i:first-child { border-radius: 4px 0 0 4px; }
+.bar i:last-child { border-radius: 0 4px 4px 0; }
+.bar i:only-child { border-radius: 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.legend a { text-decoration: none; }
+.legend a:hover { text-decoration: underline; }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
+td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.table-card { overflow-x: auto; }
+.table-card table th:first-child, .table-card table td:first-child { padding-left: 16px; }
+.table-card table th:last-child, .table-card table td:last-child { padding-right: 16px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 8px; vertical-align: -1px; }
+
+/* Profile (fish / bait) */
+.back { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); text-decoration: none; font-size: 13px; margin-bottom: 10px; }
+.back:hover { color: var(--ink); }
+.profile { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+.facts { padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; align-content: start; }
+.fact span { display: block; font-size: 12px; color: var(--ink-3); }
+.fact b { display: block; font-size: 16px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.fact small { color: var(--ink-2); font-size: 12px; }
+.where { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.where h3 { margin: 0; font-size: 13px; color: var(--ink-3); font-weight: 500; }
+.where-base { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.where-base b { font-size: 13px; min-width: 120px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.scale { position: relative; height: 34px; margin-top: 8px; }
+.scale .track { position: absolute; left: 0; right: 0; top: 12px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--sunken), var(--accent-soft) 40%, var(--accent-line)); }
+.scale .tick { position: absolute; top: 8px; width: 2px; height: 16px; background: var(--ink-3); border-radius: 1px; }
+.scale .lim { position: absolute; top: 4px; bottom: 4px; width: 2px; background: var(--bad); }
+.scale label { position: absolute; top: 26px; font-size: 11px; color: var(--ink-3); transform: translateX(-50%); white-space: nowrap; }
+
+/* Catalog grids */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.tile { padding: 14px; text-decoration: none; display: flex; flex-direction: column; gap: 6px; transition: border-color .15s, transform .15s; }
+.tile:hover { border-color: var(--accent-line); }
+.tile-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.tile-head b { font-size: 15px; }
+.tile p { margin: 0; font-size: 12px; color: var(--ink-2); }
+.tile .chips { margin-top: 2px; }
+.group-title { margin: 22px 0 10px; font-size: 13px; color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+
+/* Rods */
+.rods { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.rod { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.rod-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rod-head b { font-size: 16px; }
+.parts { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; font-size: 13px; }
+.parts span:nth-child(3n+1) { color: var(--ink-3); }
+.parts .weak { color: var(--bad); font-weight: 600; }
+.limit { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--sunken); }
+.limit b { font-size: 20px; }
+.mini { display: flex; flex-direction: column; gap: 6px; }
+.mini div { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+
+/* Players */
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.person { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.person-head { display: flex; gap: 12px; align-items: center; }
+.person-head b { font-size: 16px; display: block; }
+.kv { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.kv div span { display: block; font-size: 12px; color: var(--ink-3); }
+.kv div b { font-variant-numeric: tabular-nums; }
+
+.empty { padding: 36px 20px; text-align: center; color: var(--ink-2); }
+.empty b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 4px; }
+.note { margin-top: 24px; padding: 14px 16px; font-size: 13px; color: var(--ink-2); }
+.note summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.note p { margin: 8px 0 0; }
+.note label { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; }
+.loading { padding: 40px; text-align: center; color: var(--ink-3); }
+.loading::before { content: ""; display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; margin-right: 8px; vertical-align: -2px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.warn-line { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: 13px; margin-bottom: 12px; }
+
+@media (max-width: 1100px) {
+  .goals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .profile { grid-template-columns: 1fr; }
+  .stats { grid-auto-columns: 80px; }
+}
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .side { position: sticky; top: 0; z-index: 5; height: auto; flex-direction: row; align-items: center; padding: 8px 12px; gap: 4px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand { padding: 0 8px 0 0; }
+  .brand div { display: none; }
+  .nav { display: flex; gap: 2px; }
+  .nav a { padding: 7px 10px; white-space: nowrap; }
+  .nav a span { display: none; }
+  .nav a.on span { display: inline; }
+  .side-foot { margin: 0 0 0 auto; flex-direction: row; }
+  .theme { display: none; }
+  .clock { padding: 6px 10px; white-space: nowrap; }
+  .clock small { display: none; }
+  main { padding: 16px 16px 40px; }
+  .opt { grid-template-columns: 24px minmax(0, 1fr) 32px; }
+  .opt .stats { grid-column: 2 / 3; grid-row: 2; grid-auto-flow: row; grid-template-columns: repeat(2, 1fr); grid-auto-columns: auto; }
+  .opt .stat { text-align: left; }
+  .opt .more { grid-column: 3; grid-row: 1; }
+  .catch { grid-column: 2 / 3; }
+  .kv { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 520px) {
+  .goals { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .goal { padding: 12px; }
+  .goal-value { font-size: 20px; }
+  .filters { gap: 8px; }
+  .filter { width: 100%; justify-content: space-between; }
+  .seg { overflow-x: auto; max-width: 100%; }
+}
 </style>
 </head>
 <body>
-<header>
-  <h1>Atom Fishing 2</h1>
-  <button data-tab="online" class="on">В игре</button>
-  <button data-tab="characters">Персонажи</button>
-  <button data-tab="advisor">Советник</button>
-</header>
-<main>
-  <section id="online" class="on"><div class="wrap" id="online-table"></div></section>
-  <section id="characters"><div class="wrap" id="characters-table"></div></section>
-  <section id="advisor">
-    <div class="controls">
-      <label>Персонаж <select id="who"></select></label>
-      <label>База <select id="base"></select></label>
-      <label>Время <select id="night"><option value="">сейчас</option><option value="0">день</option><option value="1">ночь</option></select></label>
-      <label>Сортировать <select id="sort">
-        <option value="moneyPerRequest">деньги за запрос</option>
-        <option value="money">деньги за поклёвку</option>
-        <option value="experiencePerRequest">опыт за запрос</option>
-        <option value="experience">опыт за поклёвку</option>
-        <option value="chance">клёв</option>
-        <option value="trophies">трофеи</option>
-        <option value="species">выбранный вид</option>
-      </select></label>
-      <label>Вид <select id="species"><option value="">любой</option></select></label>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark"><svg class="i" viewBox="0 0 24 24"><path d="M3 12c3-5 9-6 13-3l5-3v12l-5-3c-4 3-10 2-13-3z"/><circle cx="8" cy="11" r=".8" fill="currentColor"/></svg></div>
+      <div><b>Atom Fishing 2</b><span>советник рыбака</span></div>
     </div>
-    <div class="wrap" id="advisor-table"></div>
-    <p class="note" id="advisor-note"></p>
-  </section>
-</main>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <div class="clock" id="clock"></div>
+      <div class="theme" id="theme"></div>
+    </div>
+  </aside>
+  <main>
+    <div class="top">
+      <div><h1 id="title"></h1><p id="subtitle"></p></div>
+      <div class="who" id="who"></div>
+    </div>
+    <div id="filters"></div>
+    <div id="view"></div>
+  </main>
+</div>
 <script>
+'use strict';
 const $ = (id) => document.getElementById(id);
-const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const time = (seconds) => {
-  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h} ч ${m} мин` : `${m} мин`;
+const esc = (text) => String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const nf = (digits) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+const n0 = nf(0), n1 = nf(1), n2 = nf(2);
+const money = (value) => `${value >= 100 ? n0.format(value) : value >= 10 ? n1.format(value) : n2.format(value)} кр.`;
+const weight = (grams) => grams >= 1000 ? `${grams >= 10000 ? n1.format(grams / 1000) : n2.format(grams / 1000)} кг` : `${n0.format(grams)} г`;
+const meters = (cm) => `${n2.format(cm / 100)} м`;
+const pct = (share) => share >= 0.995 ? '100%' : share > 0 && share < 0.01 ? '<1%' : `${n0.format(share * 100)}%`;
+const hhmm = (hours) => { const h = Math.floor(hours) % 24, m = Math.floor((hours % 1) * 60); return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`; };
+const duration = (seconds) => { const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60); return h > 0 ? `${h} ч ${m} мин` : `${m} мин`; };
+const store = {
+  get(key, fallback) { try { const value = localStorage.getItem('af2.' + key); return value === null ? fallback : JSON.parse(value); } catch { return fallback; } },
+  set(key, value) { try { localStorage.setItem('af2.' + key, JSON.stringify(value)); } catch { /* private mode */ } },
 };
-const money = (value) => value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const percent = (value) => (value * 100).toLocaleString('ru-RU', { maximumFractionDigits: 1 }) + '%';
-const round = (value) => Math.round(value).toLocaleString('ru-RU');
-const table = (head, rows, empty) => rows.length
-  ? `<table><thead><tr>${head.map(([title, cls]) => `<th class="${cls || ''}">${title}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`
-  : `<div class="empty">${empty}</div>`;
-const get = async (url) => { const reply = await fetch(url); if (!reply.ok) throw new Error(await reply.text()); return reply.json(); };
 
-let tab = 'online';
-document.querySelectorAll('header button').forEach((button) => button.addEventListener('click', () => {
-  tab = button.dataset.tab;
-  document.querySelectorAll('header button').forEach((other) => other.classList.toggle('on', other === button));
-  document.querySelectorAll('section').forEach((section) => section.classList.toggle('on', section.id === tab));
-  refresh();
-}));
+const ICON = {
+  compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  bait: '<path d="M12 3v9a4 4 0 1 1-4-4"/><path d="M12 3l3 2"/>',
+  fish: '<path d="M3 12c3-5 9-6 13-3l5-3v12l-5-3c-4 3-10 2-13-3z"/><circle cx="8" cy="11" r=".6" fill="currentColor"/>',
+  rod: '<path d="M4 20 20 4"/><circle cx="7" cy="17" r="2"/><path d="M20 4v8"/>',
+  people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.8-3.5 3.2-5 6-5s5.2 1.5 6 5"/><path d="M16 4.5a3 3 0 0 1 0 6M18 15c1.6.6 2.6 2 3 5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  coin: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.5h4a1.75 1.75 0 0 1 0 3.5h-3a1.75 1.75 0 0 0 0 3.5h4M12 7.5v1.5M12 16.5V18"/>',
+  star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  bolt: '<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H4v1a4 4 0 0 0 4 4M16 6h4v1a4 4 0 0 1-4 4M12 13v4M8 21h8M9 17h6"/>',
+  warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
+  bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
+  shop: '<path d="M4 9h16l-1-5H5z"/><path d="M5 9v11h14V9M9 20v-6h6v6"/>',
+};
+const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[name]}</svg>`;
 
-async function showOnline() {
-  const rows = await get('/api/online');
-  $('online-table').innerHTML = table(
-    [['Персонаж'], ['Ур.', 'num'], ['Где'], ['В этот раз', 'num'], ['Всего в игре', 'num'], ['Деньги', 'num'], ['В садке', 'num'], ['Последние забросы']],
-    rows.map((row) => `<tr><td>${esc(row.name)}${row.dead ? ' <span class="dead">мёртв</span>' : ''}</td>
-      <td class="num">${row.level}</td><td>${esc(row.baseName)}, ${esc(row.locationName)}</td>
-      <td class="num">${time(row.sessionSeconds)}</td><td class="num">${time(row.playedSeconds)}</td>
-      <td class="num">${money(row.money)}</td><td class="num">${row.keepnet}</td>
-      <td class="species">${row.casts.map((cast) => `${esc(cast.locationName)}: ${esc(cast.baitName)}, ${round(cast.depth)} / ${round(cast.bottom)} см`).join('<br>') || '—'}</td></tr>`),
-    'Сейчас в игре никого нет.');
-}
+const BAIT_KINDS = { 10: 'Наживка', 11: 'Насадка', 12: 'Приманка' };
+const ROD_KINDS = { 1: 'Поплавочная', 2: 'Донная', 3: 'Спиннинг' };
+const VIEWS = [
+  { id: 'plan', title: 'Лучший улов', icon: 'compass', hint: 'Где и на что ловить с твоими снастями: по деньгам, опыту, клёву или трофеям.' },
+  { id: 'baits', title: 'Наживки', icon: 'bait', hint: 'Выбери наживку — покажу, кто и где на неё клюёт.' },
+  { id: 'fish', title: 'Рыбы', icon: 'fish', hint: 'Выбери рыбу — покажу, где она живёт и на что её ловить.' },
+  { id: 'tackle', title: 'Снасти', icon: 'rod', hint: 'Собранные удочки персонажа, что они выдерживают и где с ними лучше всего.' },
+  { id: 'players', title: 'Игроки', icon: 'people', hint: 'Кто сейчас в игре и все персонажи сервера.' },
+];
+const GOALS = [
+  { id: 'money', title: 'Деньги', icon: 'coin', unit: 'кр./ч' },
+  { id: 'experience', title: 'Опыт', icon: 'star', unit: 'опыта/ч' },
+  { id: 'bites', title: 'Клёв', icon: 'bolt', unit: 'рыб/ч' },
+  { id: 'trophies', title: 'Трофеи', icon: 'trophy', unit: 'в час' },
+];
 
-let known = [];
-async function showCharacters() {
-  known = await get('/api/characters');
-  $('characters-table').innerHTML = table(
-    [['Персонаж'], ['Ур.', 'num'], ['Опыт', 'num'], ['Деньги', 'num'], ['Эрги', 'num'], ['VIP'], ['Всего в игре', 'num'], ['В садке', 'num'], ['Рекордов', 'num'], ['']],
-    known.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.level}</td><td class="num">${round(row.experience)}</td>
-      <td class="num">${money(row.money)}</td><td class="num">${row.premium}</td><td>${row.vip ? 'да' : ''}</td>
-      <td class="num">${time(row.playedSeconds)}</td><td class="num">${row.keepnet}</td><td class="num">${row.records}</td>
-      <td class="muted">${row.online ? 'в игре' : ''}</td></tr>`),
-    'Персонажей нет.');
-}
-
+const state = {
+  world: null, characters: [], loadedAt: 0,
+  who: store.get('who', ''), base: store.get('base', 'here'), time: store.get('time', 'now'), scope: store.get('scope', 'shop'),
+  tackle: store.get('tackle', 'auto'), goal: store.get('goal', 'money'), fight: store.get('fight', 20), bottom: store.get('bottom', 200),
+  query: '', theme: store.get('theme', 'auto'),
+};
+const cache = new Map();
 let advice = null;
-async function showAdvisor() {
-  if (!known.length) known = await get('/api/characters');
-  const who = $('who');
-  if (who.options.length !== known.length) {
-    const was = who.value;
-    who.innerHTML = known.map((row) => `<option value="${row.id}">${esc(row.name)}${row.online ? ' (в игре)' : ''}</option>`).join('');
-    if (was) who.value = was;
+
+async function get(url) {
+  const reply = await fetch(url, { cache: 'no-store' });
+  if (!reply.ok) throw new Error(await reply.text());
+  return reply.json();
+}
+async function adviceFor(extra = {}) {
+  const params = new URLSearchParams();
+  if (state.who) params.set('character', state.who);
+  if (state.base !== 'here') params.set('base', state.base);
+  if (state.time !== 'now') params.set('time', state.time);
+  params.set('scope', state.scope);
+  if (state.tackle !== 'auto') params.set('tackle', state.tackle);
+  params.set('goal', state.goal);
+  params.set('bottom', state.bottom);
+  for (const [key, value] of Object.entries(extra)) if (value !== undefined && value !== null) params.set(key, value);
+  const url = '/api/advisor?' + params;
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < 20000) return hit.data;
+  const data = await get(url);
+  cache.set(url, { at: Date.now(), data });
+  return data;
+}
+
+/* Lookups */
+const W = () => state.world;
+const baseName = (id) => W().bases.find((base) => base.id === id)?.name ?? `база ${id}`;
+const locationOf = new Map();
+const speciesById = new Map(), baitById = new Map();
+function index() {
+  locationOf.clear(); speciesById.clear(); baitById.clear();
+  for (const base of W().bases) for (const location of base.locations) locationOf.set(location.id, { ...location, base: base.id });
+  for (const one of W().species) speciesById.set(one.id, one);
+  for (const bait of W().baits) baitById.set(bait.id, bait);
+}
+const placeName = (id) => locationOf.get(id)?.name ?? `локация ${id}`;
+const speciesName = (id) => speciesById.get(id)?.name ?? `вид ${id}`;
+const baitName = (id) => baitById.get(id)?.name ?? `наживка ${id}`;
+
+/* Rates: the client asks for a bite every few seconds; a bite then takes the fight and a new cast. */
+const bitesPerHour = (chance) => chance > 0 ? 3600 / (W().biteRequestSeconds / chance + Number(state.fight || 0)) : 0;
+const perHour = (row) => {
+  const bites = bitesPerHour(row.chance);
+  return { bites, landed: bites * (1 - Math.max(0, row.lost)), money: bites * row.money, experience: bites * row.experience, trophies: bites * row.trophies };
+};
+const goalValue = (row, goal) => { const rate = perHour(row); return goal === 'bites' ? rate.landed : rate[goal]; };
+const goalText = (value, goal) => goal === 'money' ? money(value) : n0.format(value) === '0' && value > 0 ? n1.format(value) : n0.format(value);
+
+/* Species colours follow the species within a view: the first eight seen get the slots. */
+function palette(rows) {
+  const slots = new Map();
+  for (const row of rows) for (const one of row.species.slice(0, 5)) {
+    if (!slots.has(one.id) && slots.size < 8) slots.set(one.id, `var(--s${slots.size + 1})`);
   }
-  if (!who.value) { $('advisor-table').innerHTML = '<div class="empty">Персонажей нет.</div>'; return; }
-  const base = $('base').value, night = $('night').value;
-  advice = await get(`/api/advisor?character=${who.value}${base ? `&base=${base}` : ''}${night ? `&night=${night}` : ''}`);
-  const bases = $('base');
-  if (bases.options.length !== advice.bases.length) bases.innerHTML = advice.bases.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
-  bases.value = advice.base;
-  const species = $('species'), chosen = species.value;
-  const names = [...new Map(advice.rows.flatMap((row) => row.species.map((one) => [one.id, one.name]))).entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  species.innerHTML = '<option value="">любой</option>' + names.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
-  if (names.some(([id]) => String(id) === chosen)) species.value = chosen;
-  drawAdvice();
+  return (id) => slots.get(id) ?? 'var(--other)';
+}
+function catchBar(row, color, top = 4) {
+  const shown = row.species.filter((one) => color(one.id) !== 'var(--other)').slice(0, top);
+  const rest = 1 - shown.reduce((sum, one) => sum + one.share, 0);
+  const segments = shown.map((one) => `<i style="width:${one.share * 100}%;background:${color(one.id)}" title="${esc(speciesName(one.id))}: ${pct(one.share)}"></i>`).join('')
+    + (rest > 0.005 ? `<i style="width:${rest * 100}%;background:var(--other)" title="Остальные: ${pct(rest)}"></i>` : '');
+  const legend = shown.map((one) => `<span><i style="background:${color(one.id)}"></i><a href="#/fish/${one.id}">${esc(speciesName(one.id))}</a> ${pct(one.share)}</span>`).join('')
+    + (rest > 0.005 ? `<span class="muted"><i style="background:var(--other)"></i>остальные ${pct(rest)}</span>` : '');
+  return `<div class="bar">${segments}</div><div class="legend">${legend}</div>`;
+}
+function baitChip(id, base) {
+  const bait = baitById.get(id), owned = advice?.owned?.[id] || 0;
+  const name = esc(baitName(id));
+  if (owned > 0) return `<a class="chip have" href="#/bait/${id}" title="Есть у персонажа">${icon('bag')}${name} · ${n0.format(owned)} шт.</a>`;
+  if (bait && bait.soldAt.includes(base) && bait.price > 0 && bait.level <= (advice?.character.level ?? 99)) {
+    return `<a class="chip shop" href="#/bait/${id}" title="Продаётся на этой базе">${icon('shop')}${name} · ${money(bait.price)}${bait.pack > 1 ? ` за ${bait.pack}` : ''}</a>`;
+  }
+  return `<a class="chip" href="#/bait/${id}" title="Нет у персонажа и не продаётся здесь">${name}</a>`;
+}
+const timeTag = (night) => night ? `<span class="time-tag is-night">${icon('moon')}ночью</span>` : `<span class="time-tag is-day">${icon('sun')}днём</span>`;
+function depthText(row) {
+  const bottom = `дно ${meters(row.bottom)}${row.measured ? '' : '?'}`;
+  return row.depth >= row.bottom ? `у дна · ${bottom}` : `${meters(row.depth)} · ${bottom}`;
 }
 
-function drawAdvice() {
-  if (!advice) return;
-  const sort = $('sort').value, wanted = Number($('species').value) || 0;
-  const share = (row) => row.species.find((one) => one.id === wanted)?.share || 0;
-  const score = (row) => ({
-    moneyPerRequest: row.chance * row.money, money: row.money, experiencePerRequest: row.chance * row.experience,
-    experience: row.experience, chance: row.chance, trophies: row.trophies, species: row.chance * share(row),
-  }[sort]);
-  let rows = advice.rows.slice();
-  if (wanted) rows = rows.filter((row) => share(row) > 0);
-  rows.sort((a, b) => score(b) - score(a));
-  $('advisor-table').innerHTML = table(
-    [['Локация'], ['Наживка'], ['Глубина / дно', 'num'], ['Клёв', 'num'], ['Деньги', 'num'], ['Опыт', 'num'], ['Трофеи', 'num'], ['Кто клюёт']],
-    rows.slice(0, 60).map((row) => `<tr><td>${esc(row.locationName)}</td><td>${esc(row.baitName)}</td>
-      <td class="num">${round(row.depth)} / ${round(row.bottom)} см${row.measured ? '' : ' <span class="muted">?</span>'}</td>
-      <td class="num">${percent(row.chance)}</td><td class="num">${money(row.money)}</td><td class="num">${round(row.experience)}</td>
-      <td class="num">${percent(row.trophies)}</td>
-      <td class="species">${row.species.slice(0, 5).map((one) => `${esc(one.name)} ${percent(one.share)}, ~${round(one.grams)} г`).join('; ')}</td></tr>`),
-    advice.rows.length ? 'Под выбранный вид ничего нет.' : 'У персонажа нет наживки, на которую здесь клюёт.');
-  $('advisor-note').textContent = `${advice.character}, ${advice.baseName}, ${advice.night ? 'ночь' : 'день'}. ` +
-    'Клёв — шанс поклёвки на один запрос клиента; деньги (у скупщика), опыт и трофеи — в среднем за одну поклёвку, с навыками, репутацией базы и VIP персонажа. ' +
-    'Глубина и дно — из последнего заброса на этой локации; со знаком «?» заброса не было, и наживка считается лежащей на дне в 2 м.';
+/* Clock */
+function gameHourNow() {
+  const clock = W().clock;
+  return (clock.gameHour + (Date.now() - state.loadedAt) / 3600000 * clock.gameHoursPerRealHour) % 24;
+}
+function isNightAt(hour) { const clock = W().clock; return hour >= clock.nightStart || hour < clock.nightEnd; }
+function drawClock() {
+  if (!W()) return;
+  const clock = W().clock, hour = gameHourNow(), night = isNightAt(hour);
+  const next = night ? clock.nightEnd : clock.nightStart;
+  const left = ((next - hour + 24) % 24) / clock.gameHoursPerRealHour * 60;
+  $('clock').innerHTML = `<div class="clock-row ${night ? 'is-night' : 'is-day'}">${icon(night ? 'moon' : 'sun')}${night ? 'Ночь' : 'День'} · ${hhmm(hour)}</div>
+    <small>${night ? 'Рассвет' : 'Ночь'} через ${n0.format(Math.max(1, left))} мин</small>`;
+  if (state.time === 'now' && advice && advice.nights[0] !== night) { cache.clear(); render(); }
 }
 
-['who', 'base', 'night'].forEach((id) => $(id).addEventListener('change', () => {
-  if (id === 'who') $('base').value = '';
-  showAdvisor().catch(fail);
-}));
-['sort', 'species'].forEach((id) => $(id).addEventListener('change', drawAdvice));
-
-function fail(error) { const box = $(`${tab}-table`); if (box) box.innerHTML = `<div class="empty">Ошибка: ${esc(error.message)}</div>`; }
-function refresh() {
-  const work = { online: showOnline, characters: showCharacters, advisor: showAdvisor }[tab];
-  work().catch(fail);
+/* Theme */
+function applyTheme() {
+  if (state.theme === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', state.theme);
+  $('theme').innerHTML = [['auto', 'Авто'], ['light', 'Светлая'], ['dark', 'Тёмная']]
+    .map(([id, title]) => `<button data-theme-pick="${id}" class="${state.theme === id ? 'on' : ''}">${title}</button>`).join('');
 }
-refresh();
-setInterval(() => { if (tab !== 'advisor') refresh(); }, 5000);
+
+/* Header parts */
+function drawNav(view) {
+  $('nav').innerHTML = VIEWS.map((one) => `<a href="#/${one.id === 'plan' ? '' : one.id}" class="${one.id === view ? 'on' : ''}">${icon(one.icon)}<span>${one.title}</span></a>`).join('');
+}
+function drawWho() {
+  const current = state.characters.find((one) => String(one.id) === String(advice?.character.id ?? state.who)) ?? state.characters[0];
+  if (!current) { $('who').innerHTML = '<small>Персонажей нет</small>'; return; }
+  const options = [`<option value="">Авто — кто в игре</option>`]
+    .concat(state.characters.map((one) => `<option value="${one.id}" ${String(one.id) === String(state.who) ? 'selected' : ''}>${esc(one.name)}${one.online ? ' · в игре' : ''}</option>`)).join('');
+  const where = advice ? `${baseName(advice.character.base)}${advice.character.location ? ' · ' + placeName(advice.character.location) : ''}` : '';
+  $('who').innerHTML = `<div class="avatar ${current.online ? 'online' : ''}">${esc(current.name.slice(0, 1))}</div>
+    <div><select id="who-pick" aria-label="Персонаж">${options}</select><small>ур. ${current.level} · ${money(current.money)}${where ? ' · ' + esc(where) : ''}</small></div>`;
+}
+function seg(name, value, options) {
+  return `<div class="seg" role="group">${options.map(([id, title, ic]) => `<button data-set="${name}" data-value="${id}" class="${String(value) === String(id) ? 'on' : ''}">${ic ? icon(ic) : ''}${title}</button>`).join('')}</div>`;
+}
+function filterBar(parts) {
+  const bases = `<select class="pick" data-pick="base"><option value="here" ${state.base === 'here' ? 'selected' : ''}>Где персонаж</option><option value="all" ${state.base === 'all' ? 'selected' : ''}>Все базы</option>${W().bases.map((base) => `<option value="${base.id}" ${String(state.base) === String(base.id) ? 'selected' : ''}>${esc(base.name)}</option>`).join('')}</select>`;
+  const pieces = {
+    base: `<div class="filter"><span>База</span>${bases}</div>`,
+    time: `<div class="filter"><span>Время</span>${seg('time', state.time, [['now', 'Сейчас', 'clock'], ['day', 'День', 'sun'], ['night', 'Ночь', 'moon'], ['both', 'Сутки']])}</div>`,
+    scope: `<div class="filter"><span>Наживки</span>${seg('scope', state.scope, [['mine', 'Мои'], ['shop', 'Мои и в магазине'], ['all', 'Все']])}</div>`,
+    tackle: `<div class="filter"><span>Снасть</span>${seg('tackle', state.tackle === 'auto' || state.tackle === 'none' ? state.tackle : 'auto', [['auto', 'Мои удочки'], ['none', 'Без предела']])}</div>`,
+    search: `<div class="search">${icon('search')}<input id="search" type="search" placeholder="Найти по названию" value="${esc(state.query)}" autocomplete="off"></div>`,
+  };
+  return `<div class="filters">${parts.map((part) => pieces[part]).join('')}</div>`;
+}
+function setHeader(title, subtitle) { $('title').textContent = title; $('subtitle').textContent = subtitle; }
+const loading = (text = 'Считаю…') => `<div class="loading">${esc(text)}</div>`;
+const empty = (title, text) => `<div class="card empty"><b>${esc(title)}</b>${esc(text)}</div>`;
+
+/* Option row (plan and fish views) */
+function optionRow(row, i, color, lead, options = {}) {
+  const rate = perHour(row);
+  const stats = [
+    ['money', money(rate.money), 'кр./час'],
+    ['experience', n0.format(rate.experience), 'опыта/час'],
+    ['bites', n0.format(rate.landed), 'рыб/час'],
+    ['trophies', rate.trophies >= 1 ? n0.format(rate.trophies) : n1.format(rate.trophies), 'трофеев/час'],
+  ];
+  if (options.species) {
+    const one = row.species.find((s) => s.id === options.species);
+    stats.splice(0, 4,
+      ['target', n1.format(rate.bites * one.share * (1 - Math.max(0, one.lost))), `${speciesName(options.species).toLowerCase()}/час`],
+      ['share', pct(one.share), 'доля клёва'],
+      ['weight', weight(one.grams), 'средний вес'],
+      ['money', money(rate.money), 'кр./час']);
+  }
+  const warnings = [];
+  if (row.noRod) warnings.push(`<span class="chip bad">${icon('warn')}нет удочки под эту наживку</span>`);
+  if (row.lost > 0.05) warnings.push(`<span class="chip bad" title="Тяжелее, чем держит снасть: клиент её отпускает">сходит ${pct(row.lost)}</span>`);
+  const place = `<b>${esc(placeName(row.location))}</b>${state.base === 'here' && !options.showBase ? '' : `<span class="muted">${esc(baseName(row.base))}</span>`}`;
+  return `<article class="card opt ${i === 0 ? 'best' : ''}" data-row="${i}">
+    <div class="rank">${i + 1}</div>
+    <div><div class="opt-title">${place}</div>
+      <div class="opt-meta">${baitChip(row.bait, row.base)}<span>${depthText(row)}</span>${state.time === 'both' || options.alwaysTime ? timeTag(row.night) : ''}${warnings.join('')}</div></div>
+    <div class="stats">${stats.map(([id, value, label]) => `<div class="stat ${id === lead ? 'lead' : ''}"><b>${value}</b><span>${label}</span></div>`).join('')}</div>
+    <button class="more" data-toggle="${i}" aria-label="Подробнее">${icon('down')}</button>
+    <div class="catch">${catchBar(row, color)}</div>
+    <div class="detail">${speciesTable(row, color)}</div>
+  </article>`;
+}
+function speciesTable(row, color) {
+  const rate = perHour(row);
+  return `<table><thead><tr><th>Рыба</th><th class="r">Доля клёва</th><th class="r">В час</th><th class="r">Средний вес</th><th class="r">Цена</th><th class="r">Опыт</th><th class="r">Трофеи</th><th class="r">Сходит</th></tr></thead><tbody>
+    ${row.species.map((one) => `<tr><td><span class="swatch" style="background:${color(one.id)}"></span><a href="#/fish/${one.id}">${esc(speciesName(one.id))}</a></td>
+      <td class="r">${pct(one.share)}</td><td class="r">${n1.format(rate.bites * one.share * (1 - Math.max(0, one.lost)))}</td><td class="r">${weight(one.grams)}</td>
+      <td class="r">${money(one.money)}</td><td class="r">${n0.format(one.experience)}</td><td class="r">${pct(one.trophies)}</td><td class="r">${one.lost > 0.005 ? pct(one.lost) : '—'}</td></tr>`).join('')}
+  </tbody></table>
+  <p class="muted" style="margin:10px 0 0;font-size:12px">Шанс поклёвки на запрос клиента — ${pct(row.chance)}, поклёвка примерно раз в ${n0.format(W().biteRequestSeconds / row.chance)} с ожидания. Цена и опыт — в среднем за поклёвку этого вида, с навыками, репутацией базы и VIP; сошедшая рыба ничего не приносит.</p>`;
+}
+
+function methodNote() {
+  return `<details class="card note"><summary>Как это считается</summary>
+    <p>Сервер считает прогноз теми же функциями, что и настоящую поклёвку: какие рыбы есть на локации, кто берёт эту наживку на этой глубине днём или ночью, шанс поклёвки с привлекательностью наживки и навыками, вес с удачей, цену у скупщика и опыт с образованием, репутацией базы и VIP персонажа.</p>
+    <p>Снасть: клиент отпускает рыбу тяжелее 2,5 × самого слабого из тестов удилища и лески — такая рыба считается сошедшей. Глубина: пробуются «у дна» и глубины, ниже которых часть рыб не берёт; показана лучшая. Дно — из последнего заброса персонажа на этой локации, а где он не забрасывал (со знаком «?») — <input class="num-input" type="number" min="10" max="3000" step="10" data-pick="bottom" value="${esc(state.bottom)}"> см.</p>
+    <p>В час: клиент спрашивает поклёвку раз в ${n0.format(W().biteRequestSeconds)} с, и на вываживание с новым забросом уходит <input class="num-input" type="number" min="0" max="300" step="1" data-pick="fight" value="${esc(state.fight)}"> с.</p>
+  </details>`;
+}
+
+/* Views */
+async function viewPlan(box) {
+  setHeader('Лучший улов', VIEWS[0].hint);
+  $('filters').innerHTML = filterBar(['base', 'time', 'scope', 'tackle']);
+  box.innerHTML = loading();
+  advice = await adviceFor();
+  drawWho();
+  const rows = advice.rows.slice().sort((a, b) => goalValue(b, state.goal) - goalValue(a, state.goal));
+  const best = (goal) => advice.rows.reduce((top, row) => (!top || goalValue(row, goal) > goalValue(top, goal) ? row : top), null);
+  const cards = GOALS.map((goal) => {
+    const row = best(goal.id);
+    return `<button class="goal ${state.goal === goal.id ? 'on' : ''}" data-set="goal" data-value="${goal.id}">
+      <span class="goal-head">${icon(goal.icon)}${goal.title}</span>
+      <span class="goal-value num">${row ? goalText(goalValue(row, goal.id), goal.id).replace(' кр.', '') : '—'}<small>${goal.unit}</small></span>
+      <span class="goal-where">${row ? `${esc(placeName(row.location))} · ${esc(baitName(row.bait))}` : 'нечем ловить'}</span>
+    </button>`;
+  }).join('');
+  const color = palette(rows.slice(0, 20));
+  const scopeHint = { mine: 'наживки, которые есть у персонажа', shop: 'свои наживки и те, что продаются на базе', all: 'все наживки игры' }[state.scope];
+  const warning = advice.rods.length ? '' : `<div class="warn-line">${icon('warn')}У персонажа нет собранной удочки — считаю без предела снасти.</div>`;
+  box.innerHTML = `${warning}<div class="goals">${cards}</div>
+    <div class="section-title"><h2>Варианты</h2><span>${rows.length ? `${Math.min(rows.length, 30)} из ${rows.length} · ${scopeHint}` : ''}</span></div>
+    ${rows.length ? `<div class="list">${rows.slice(0, 30).map((row, i) => optionRow(row, i, color, state.goal)).join('')}</div>`
+      : empty('Нечего предложить', state.scope === 'mine' ? 'На этой базе ни одна твоя наживка не работает. Попробуй «Мои и в магазине».' : 'Под выбранные условия ничего не клюёт.')}
+    ${methodNote()}`;
+}
+
+function baitStats(bait) {
+  const takers = W().species.filter((one) => one.baits.includes(bait.id));
+  return { takers };
+}
+async function viewBaits(box) {
+  setHeader('Наживки', VIEWS[1].hint);
+  $('filters').innerHTML = filterBar(['search', 'base']);
+  if (!advice) { advice = await adviceFor({ bait: -1 }); drawWho(); }
+  const here = state.base === 'here' ? advice.character.base : state.base === 'all' ? null : Number(state.base);
+  const q = state.query.trim().toLowerCase();
+  const groups = [10, 11, 12].map((kind) => {
+    const baits = W().baits.filter((bait) => bait.kind === kind && (!q || bait.name.toLowerCase().includes(q)))
+      .filter((bait) => here === null || W().species.some((one) => one.baits.includes(bait.id) && one.locations.some((location) => locationOf.get(location)?.base === here)));
+    if (!baits.length) return '';
+    const tiles = baits.map((bait) => {
+      const owned = advice.owned[bait.id] || 0, takers = baitStats(bait).takers.length;
+      const sold = here !== null && bait.soldAt.includes(here);
+      return `<a class="card tile" href="#/bait/${bait.id}"><div class="tile-head"><b>${esc(bait.name)}</b>${bait.price > 0 ? `<span class="muted num">${money(bait.price)}</span>` : ''}</div>
+        <p>Берут ${takers} ${plural(takers, 'вид', 'вида', 'видов')} рыб${bait.level > 1 ? ` · с ${bait.level} ур.` : ''}</p>
+        <div class="chips">${owned ? `<span class="chip have">${icon('bag')}${n0.format(owned)} шт.</span>` : ''}${sold ? `<span class="chip shop">${icon('shop')}в магазине</span>` : ''}</div></a>`;
+    }).join('');
+    return `<div class="group-title">${BAIT_KINDS[kind]}</div><div class="grid">${tiles}</div>`;
+  }).join('');
+  box.innerHTML = groups || empty('Ничего не нашлось', 'Попробуй другое название или другую базу.');
+}
+const plural = (n, one, few, many) => { const t = n % 10, h = n % 100; return t === 1 && h !== 11 ? one : t >= 2 && t <= 4 && (h < 12 || h > 14) ? few : many; };
+
+async function viewBait(box, id) {
+  const bait = baitById.get(id);
+  setHeader(bait ? bait.name : 'Наживка', bait ? `${BAIT_KINDS[bait.kind] ?? 'Наживка'} — кто и где на неё клюёт.` : '');
+  $('filters').innerHTML = filterBar(['base', 'time', 'tackle']);
+  box.innerHTML = loading();
+  advice = await adviceFor({ bait: id, scope: 'all', depths: 'all', goal: 'bites' });
+  drawWho();
+  if (!bait) { box.innerHTML = empty('Нет такой наживки', ''); return; }
+  const owned = advice.owned[id] || 0;
+  const takers = baitStats(bait).takers;
+  const rods = Object.entries(ROD_KINDS).filter(([kind]) => (bait.kind === 12) === (Number(kind) === 3)).map(([, name]) => name.toLowerCase()).join(', ');
+  // Per place and time: the depth with the best bite, plus the fish that take it only higher up.
+  const groups = new Map();
+  for (const row of advice.rows) {
+    const key = `${row.base}:${row.location}:${row.night}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const places = [...groups.values()].map((rows) => {
+    rows.sort((a, b) => b.chance - a.chance);
+    const main = rows[0], seen = new Set(main.species.map((one) => one.id));
+    const higher = rows.slice(1).flatMap((row) => row.species.filter((one) => !seen.has(one.id)).map((one) => { seen.add(one.id); return { id: one.id, depth: row.depth }; }));
+    return { main, higher };
+  }).sort((a, b) => b.main.chance - a.main.chance);
+  const color = palette(places.map((place) => place.main));
+  const list = places.map(({ main, higher }, i) => {
+    const rate = perHour(main);
+    return `<article class="card opt" data-row="${i}">
+      <div class="rank">${i + 1}</div>
+      <div><div class="opt-title"><b>${esc(placeName(main.location))}</b><span class="muted">${esc(baseName(main.base))}</span></div>
+        <div class="opt-meta"><span>${depthText(main)}</span>${state.time === 'both' ? timeTag(main.night) : ''}${main.lost > 0.05 ? `<span class="chip bad">сходит ${pct(main.lost)}</span>` : ''}</div></div>
+      <div class="stats"><div class="stat lead"><b>${n0.format(rate.landed)}</b><span>рыб/час</span></div><div class="stat"><b>${money(rate.money)}</b><span>кр./час</span></div><div class="stat"><b>${n0.format(rate.experience)}</b><span>опыта/час</span></div></div>
+      <button class="more" aria-label="Подробнее">${icon('down')}</button>
+      <div class="catch">${catchBar(main, color, 5)}${higher.length ? `<div class="legend muted">Выше дна ещё: ${higher.map((one) => `<a href="#/fish/${one.id}">${esc(speciesName(one.id))}</a> (до ${meters(one.depth)})`).join(', ')}</div>` : ''}</div>
+      <div class="detail">${speciesTable(main, color)}</div>
+    </article>`;
+  }).join('');
+  const soldAt = bait.soldAt.map((base) => `<span class="chip shop">${icon('shop')}${esc(baseName(base))}</span>`).join('') || '<span class="muted">нигде не продаётся</span>';
+  box.innerHTML = `<a class="back" href="#/baits">${icon('back')}Все наживки</a>
+    <div class="profile">
+      <div class="card facts">
+        <div class="fact"><span>У тебя</span><b>${owned ? `${n0.format(owned)} шт.` : 'нет'}</b></div>
+        <div class="fact"><span>Цена в магазине</span><b>${bait.price > 0 ? money(bait.price) : '—'}</b>${bait.pack > 1 ? `<small>за ${bait.pack} шт.</small>` : ''}</div>
+        <div class="fact"><span>Уровень</span><b>${bait.level > 1 ? `с ${bait.level}` : 'любой'}</b></div>
+        <div class="fact"><span>Удочка</span><b>${esc(rods)}</b></div>
+      </div>
+      <div class="card where"><h3>Продаётся</h3><div class="chips">${soldAt}</div>
+        <h3>Берут (${takers.length})</h3><div class="chips">${takers.map((one) => `<a class="chip" href="#/fish/${one.id}">${esc(one.name)}</a>`).join('')}</div></div>
+    </div>
+    <div class="section-title"><h2>Где клюёт</h2><span>${places.length ? `${places.length} ${plural(places.length, 'место', 'места', 'мест')}` : ''}</span></div>
+    ${places.length ? `<div class="list">${list}</div>` : empty('Здесь на неё не клюёт', 'Выбери другую базу или «Все базы».')}
+    ${methodNote()}`;
+}
+
+async function viewFishList(box) {
+  setHeader('Рыбы', VIEWS[2].hint);
+  $('filters').innerHTML = filterBar(['search', 'base']);
+  if (!advice) { advice = await adviceFor({ bait: -1 }); drawWho(); }
+  const here = state.base === 'here' ? advice.character.base : state.base === 'all' ? null : Number(state.base);
+  const q = state.query.trim().toLowerCase();
+  const fish = W().species.filter((one) => (!q || one.name.toLowerCase().includes(q)) && one.locations.length
+    && (here === null || one.locations.some((location) => locationOf.get(location)?.base === here)));
+  const tiles = fish.map((one) => {
+    const bases = [...new Set(one.locations.map((location) => locationOf.get(location)?.base).filter(Boolean))];
+    const mine = one.baits.filter((bait) => advice.owned[bait]).length;
+    return `<a class="card tile" href="#/fish/${one.id}"><div class="tile-head"><b>${esc(one.name)}</b><span class="muted num">до ${weight(one.topGrams)}</span></div>
+      <p>${bases.length > 2 ? `${bases.length} ${plural(bases.length, 'база', 'базы', 'баз')}` : bases.map((base) => esc(baseName(base))).join(', ')} · трофей от ${weight(one.trophyGrams)}</p>
+      <div class="chips">${one.baits.length === 0 ? '<span class="chip have">на любую наживку</span>' : mine ? `<span class="chip have">${icon('bag')}${mine} ${plural(mine, 'твоя наживка', 'твои наживки', 'твоих наживок')}</span>` : '<span class="chip">твоих наживок нет</span>'}
+        ${one.nightFactor === 0 ? `<span class="chip">${icon('sun')}только днём</span>` : one.nightFactor > 1 ? `<span class="chip">${icon('moon')}ночью лучше</span>` : ''}</div></a>`;
+  }).join('');
+  box.innerHTML = fish.length ? `<div class="grid">${tiles}</div>` : empty('Ничего не нашлось', 'Попробуй другое название или «Все базы».');
+}
+
+async function viewFish(box, id) {
+  const fish = speciesById.get(id);
+  setHeader(fish ? fish.name : 'Рыба', 'Где живёт, на что берёт и где её ловить лучше всего.');
+  $('filters').innerHTML = filterBar(['base', 'time', 'scope', 'tackle']);
+  box.innerHTML = loading();
+  advice = await adviceFor({ species: id });
+  drawWho();
+  if (!fish) { box.innerHTML = empty('Нет такой рыбы', ''); return; }
+  const byBase = new Map();
+  for (const location of fish.locations) {
+    const found = locationOf.get(location);
+    if (!found) continue;
+    if (!byBase.has(found.base)) byBase.set(found.base, []);
+    byBase.get(found.base).push(found.name);
+  }
+  const depth = [fish.nearBottom ? 'держится у дна' : null, fish.likesDepth ? 'любит глубокие места' : null,
+    fish.minDepthCm > 0 ? `глубже ${meters(fish.minDepthCm)}` : null, fish.maxDepthCm > 0 ? `не глубже ${meters(fish.maxDepthCm)}` : null].filter(Boolean).join(', ') || 'на любой глубине';
+  const night = fish.nightFactor === 0 ? 'ночью не клюёт' : fish.nightFactor < 1 ? `ночью в ${n1.format(1 / fish.nightFactor)} раза реже` : fish.nightFactor > 1 ? `ночью в ${n1.format(fish.nightFactor)} раза чаще` : 'днём и ночью одинаково';
+  const best = advice.rows.slice().sort((a, b) => speciesRate(b, id) - speciesRate(a, id));
+  const limit = Math.max(0, ...advice.rods.map((rod) => rod.limitGrams || 0));
+  const top = fish.topGrams;
+  const mark = (grams) => `${Math.min(100, grams / top * 100)}%`;
+  const scale = `<div class="scale"><div class="track"></div>
+    <div class="tick" style="left:${mark(fish.largeGrams)}"></div><label style="left:${mark(fish.largeGrams)}">крупная ${weight(fish.largeGrams)}</label>
+    <div class="tick" style="left:${mark(fish.trophyGrams)}"></div><label style="left:${mark(fish.trophyGrams)}">трофей ${weight(fish.trophyGrams)}</label>
+    ${limit > 0 && limit < top ? `<div class="lim" style="left:${mark(limit)}" title="Твоя самая крепкая удочка держит до ${weight(limit)}"></div>` : ''}</div>`;
+  const color = palette(best.slice(0, 20));
+  box.innerHTML = `<a class="back" href="#/fish">${icon('back')}Все рыбы</a>
+    <div class="profile">
+      <div class="card facts">
+        <div class="fact"><span>Вес</span><b>${weight(fish.smallGrams)} — ${weight(top)}</b><small>трофей от ${weight(fish.trophyGrams)}</small></div>
+        <div class="fact"><span>Цена за кг</span><b>${money(fish.pricePerKg[0])}</b><small>крупная ${money(fish.pricePerKg[1])}, трофей ${money(fish.pricePerKg[2])}</small></div>
+        <div class="fact"><span>Глубина</span><b style="font-size:14px">${esc(depth)}</b></div>
+        <div class="fact"><span>Время</span><b style="font-size:14px">${esc(night)}</b></div>
+        <div style="grid-column:1/-1">${scale}${limit > 0 && limit < top ? `<small class="muted">Красная черта — предел твоей самой крепкой удочки, ${weight(limit)}: рыба тяжелее сойдёт.</small>` : ''}</div>
+      </div>
+      <div class="card where"><h3>Где живёт</h3>
+        ${[...byBase.entries()].map(([base, names]) => `<div class="where-base"><b>${esc(baseName(base))}</b><span class="muted">${names.map(esc).join(', ')}</span></div>`).join('') || '<span class="muted">нигде</span>'}
+        <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base)).join('') : '<span class="chip have">любую наживку</span>'}</div></div>
+    </div>
+    <div class="section-title"><h2>Где и на что ловить</h2><span>${best.length ? `${Math.min(best.length, 25)} из ${best.length}, по улову этой рыбы в час` : ''}</span></div>
+    ${best.length ? `<div class="list">${best.slice(0, 25).map((row, i) => optionRow(row, i, color, 'target', { species: id, showBase: true })).join('')}</div>`
+      : empty('Не найдено', state.scope === 'mine' ? 'Твоими наживками её здесь не поймать — попробуй «Мои и в магазине» или «Все».' : state.base === 'all' ? 'Под выбранные условия она не клюёт.' : 'На этой базе её нет или она не клюёт в это время — попробуй «Все базы» или «Сутки».')}
+    ${methodNote()}`;
+}
+const speciesRate = (row, id) => { const one = row.species.find((s) => s.id === id); return one ? bitesPerHour(row.chance) * one.share * (1 - Math.max(0, one.lost)) : 0; };
+
+async function viewTackle(box) {
+  setHeader('Снасти', VIEWS[3].hint);
+  $('filters').innerHTML = filterBar(['base', 'time', 'scope']);
+  box.innerHTML = loading();
+  advice = await adviceFor({ bait: -1 });
+  drawWho();
+  if (!advice.rods.length) { box.innerHTML = empty('Удочек нет', 'Собери удочку в рюкзаке: удилище, катушка, леска, крючок и наживка.'); return; }
+  const tops = await Promise.all(advice.rods.map((rod) => adviceFor({ tackle: rod.bag })));
+  const cells = { 1: 'Удилище', 2: 'Катушка', 3: 'Леска', 4: 'Поплавок', 5: 'Грузило', 10: 'Крючок', 20: 'Наживка' };
+  box.innerHTML = `<div class="rods">${advice.rods.map((rod, i) => {
+    const weakest = Math.min(...rod.parts.filter((part) => part.cell === 1 || part.cell === 3).map((part) => part.testKg || Infinity));
+    const best = tops[i].rows.slice().sort((a, b) => goalValue(b, 'money') - goalValue(a, 'money')).slice(0, 5);
+    return `<div class="card rod">
+      <div class="rod-head"><b>${esc(rod.name)}</b><span class="chip">${esc(ROD_KINDS[rod.kind] ?? 'Удочка')}</span></div>
+      <div class="parts">${rod.parts.map((part) => `<span>${cells[part.cell] ?? `ячейка ${part.cell}`}</span><span>${part.cell === 20 ? `<a href="#/bait/${part.template}">${esc(part.name)}</a>` : esc(part.name)}</span>
+        <span class="${part.testKg === weakest && (part.cell === 1 || part.cell === 3) ? 'weak' : 'muted'}">${part.testKg ? `тест ${n1.format(part.testKg)} кг` : ''}</span>`).join('')}</div>
+      <div class="limit"><span class="muted">Держит до</span><b>${rod.limitGrams ? weight(rod.limitGrams) : 'любой рыбы'}</b></div>
+      <div class="mini"><span class="muted" style="font-size:12px">Где с ней больше всего денег</span>${best.length ? best.map((row) => `<div><span>${esc(placeName(row.location))} · <a href="#/bait/${row.bait}">${esc(baitName(row.bait))}</a></span><b class="num">${money(goalValue(row, 'money'))}/ч</b></div>`).join('') : '<span class="muted">подходящих наживок нет</span>'}</div>
+    </div>`;
+  }).join('')}</div>${methodNote()}`;
+}
+
+async function viewPlayers(box) {
+  setHeader('Игроки', VIEWS[4].hint);
+  $('filters').innerHTML = '';
+  const [online, characters] = await Promise.all([get('/api/online'), get('/api/characters')]);
+  state.characters = characters;
+  const people = online.map((row) => `<div class="card person">
+    <div class="person-head"><div class="avatar online">${esc(row.name.slice(0, 1))}</div><div><b>${esc(row.name)}${row.dead ? ' <span class="chip bad">мёртв</span>' : ''}</b><span class="muted">ур. ${row.level} · ${esc(row.baseName)}, ${esc(row.locationName)}</span></div></div>
+    <div class="kv"><div><span>В этот раз</span><b>${duration(row.sessionSeconds)}</b></div><div><span>Всего</span><b>${duration(row.playedSeconds)}</b></div><div><span>Деньги</span><b>${money(row.money)}</b></div><div><span>В садке</span><b>${row.keepnet}</b></div></div>
+    ${row.casts.length ? `<div class="mini"><span class="muted" style="font-size:12px">Последние забросы</span>${row.casts.map((cast) => `<div><span>${esc(cast.locationName)} · ${esc(cast.baitName)}</span><span class="muted num">${meters(cast.depth)} / дно ${meters(cast.bottom)}</span></div>`).join('')}</div>` : ''}
+  </div>`).join('');
+  box.innerHTML = `<div class="section-title" style="margin-top:0"><h2>В игре</h2><span>${online.length ? online.length : ''}</span></div>
+    ${online.length ? `<div class="people">${people}</div>` : empty('Сейчас никого нет', 'Страница обновляется сама каждые несколько секунд.')}
+    <div class="section-title"><h2>Все персонажи</h2><span>${characters.length}</span></div>
+    <div class="card table-card"><table><thead><tr><th>Персонаж</th><th class="r">Уровень</th><th class="r">Опыт</th><th class="r">Деньги</th><th class="r">Эрги</th><th>VIP</th><th class="r">В игре всего</th><th class="r">В садке</th><th class="r">Рекордов</th></tr></thead><tbody>
+    ${characters.map((row) => `<tr><td>${esc(row.name)} ${row.online ? '<span class="chip have">в игре</span>' : ''}</td><td class="r">${row.level}</td><td class="r">${n0.format(row.experience)}</td><td class="r">${money(row.money)}</td><td class="r">${n0.format(row.premium)}</td><td>${row.vip ? 'да' : ''}</td><td class="r">${duration(row.playedSeconds)}</td><td class="r">${row.keepnet}</td><td class="r">${row.records}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+/* Routing */
+function route() {
+  const [view = '', id] = location.hash.replace(/^#\/?/, '').split('/');
+  return { view: view || 'plan', id: id ? Number(id) : null };
+}
+let drawing = 0;
+async function render() {
+  const { view, id } = route();
+  const mine = ++drawing;
+  drawNav(view === 'bait' ? 'baits' : view);
+  const box = $('view');
+  try {
+    if (view === 'plan') await viewPlan(box);
+    else if (view === 'baits') await viewBaits(box);
+    else if (view === 'bait') await viewBait(box, id);
+    else if (view === 'fish' && id) await viewFish(box, id);
+    else if (view === 'fish') await viewFishList(box);
+    else if (view === 'tackle') await viewTackle(box);
+    else if (view === 'players') await viewPlayers(box);
+    else { location.hash = '#/'; return; }
+  } catch (error) {
+    if (mine === drawing) box.innerHTML = empty('Не получилось', error.message);
+  }
+  drawWho();
+}
+
+/* Events */
+document.addEventListener('click', (event) => {
+  const set = event.target.closest('[data-set]');
+  if (set) {
+    state[set.dataset.set] = set.dataset.value;
+    store.set(set.dataset.set, set.dataset.value);
+    render();
+    return;
+  }
+  const theme = event.target.closest('[data-theme-pick]');
+  if (theme) { state.theme = theme.dataset.themePick; store.set('theme', state.theme); applyTheme(); return; }
+  const more = event.target.closest('.more');
+  if (more) { more.closest('.opt').classList.toggle('open'); return; }
+  const row = event.target.closest('.opt');
+  if (row && !event.target.closest('a, button, input')) row.classList.toggle('open');
+});
+document.addEventListener('change', (event) => {
+  if (event.target.id === 'who-pick') {
+    state.who = event.target.value; store.set('who', state.who); advice = null; cache.clear(); render(); return;
+  }
+  const pick = event.target.closest('[data-pick]');
+  if (pick) {
+    const key = pick.dataset.pick;
+    state[key] = key === 'fight' || key === 'bottom' ? Number(pick.value) || 0 : pick.value;
+    store.set(key, state[key]);
+    render();
+  }
+});
+let typing = null;
+document.addEventListener('input', (event) => {
+  if (event.target.id !== 'search') return;
+  state.query = event.target.value;
+  clearTimeout(typing);
+  typing = setTimeout(async () => {
+    const at = event.target.selectionStart;
+    await render();
+    const input = $('search');
+    if (input) { input.focus(); input.setSelectionRange(at, at); }
+  }, 150);
+});
+window.addEventListener('hashchange', () => { state.query = ''; render(); window.scrollTo(0, 0); });
+
+async function start() {
+  applyTheme();
+  $('view').innerHTML = loading('Загружаю…');
+  try {
+    [state.world, state.characters] = await Promise.all([get('/api/world'), get('/api/characters')]);
+  } catch (error) {
+    $('view').innerHTML = empty('Сервер не отвечает', error.message);
+    return;
+  }
+  state.loadedAt = Date.now();
+  index();
+  drawClock();
+  setInterval(drawClock, 15000);
+  setInterval(async () => {
+    if (route().view === 'players') render();
+    try { state.characters = await get('/api/characters'); drawWho(); } catch { /* next time */ }
+  }, 10000);
+  render();
+}
+start();
 </script>
 </body>
 </html>

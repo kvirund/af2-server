@@ -3,10 +3,14 @@
 //! character, and a fishing advisor that works the odds out the game's way.
 //!
 //! Plain HTTP/1.1, GET only, one request per connection: `/` is the page,
-//! `/api/online`, `/api/characters` and `/api/advisor?character=ID&base=N&night=0|1`
-//! are its JSON.
+//! `/api/online`, `/api/characters`, `/api/world` (bases, fish, baits, the
+//! game's clock) and `/api/advisor` are its JSON. The advisor takes
+//! `character`, `base` (a number or `all`), `time` (`day`, `night`, `both`),
+//! `scope` (`mine`, `shop`, `all`), `tackle` (a rod's bag or `none`), `bait`,
+//! `species`, `goal` (`money`, `experience`, `bites`, `trophies`), `bottom`
+//! (cm, where no cast measured it) and `depths=all`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -15,7 +19,7 @@ use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::game::advisor::{self, Forecast};
+use crate::game::advisor::{self, Forecast, Rod, Spot, Tackle};
 use crate::game::{LastCast, death, keepnet};
 use crate::storage::CharacterData;
 use crate::world::World;
@@ -79,13 +83,8 @@ async fn route(world: &World, target: &str) -> (&'static str, &'static str, Stri
         "/" | "/index.html" => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
         "/api/online" => json(serde_json::to_string(&online(world)).map_err(Into::into)),
         "/api/characters" => json(characters(world).await),
-        "/api/advisor" => {
-            let number = |key: &str| args.get(key).and_then(|value| value.parse::<i64>().ok());
-            match number("character") {
-                Some(id) => json(advise(world, id, number("base").map(|base| base as i32), number("night").map(|night| night != 0)).await),
-                None => ("400 Bad Request", "text/plain; charset=utf-8", "character=ID".into()),
-            }
-        }
+        "/api/world" => json(serde_json::to_string(&reference(world)).map_err(Into::into)),
+        "/api/advisor" => json(advise(world, advice_query(&args)).await),
         _ => ("404 Not Found", "text/plain; charset=utf-8", "not found".into()),
     }
 }
@@ -206,52 +205,378 @@ async fn characters(world: &World) -> Result<String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LocationRef {
+    id: i32,
+    name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BaseRef {
+    id: i32,
+    name: String,
+    min_level: i32,
+    locations: Vec<LocationRef>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpeciesRef {
+    id: i32,
+    name: String,
+    small_grams: i32,
+    large_grams: i32,
+    trophy_grams: i32,
+    /// The heaviest a trophy grows.
+    top_grams: f64,
+    min_depth_cm: i32,
+    max_depth_cm: i32,
+    near_bottom: bool,
+    likes_depth: bool,
+    night_factor: f64,
+    /// Credits per kg: ordinary, large, trophy.
+    price_per_kg: [f64; 3],
+    /// Empty: any bait.
+    baits: Vec<i32>,
+    locations: Vec<i32>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BaitRef {
+    id: i32,
+    name: String,
+    kind: i32,
+    /// Credits for one purchase of `pack` pieces, 0 if not sold for credits.
+    price: f64,
+    pack: i32,
+    level: i32,
+    /// Bases whose shops sell it.
+    sold_at: Vec<i32>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Clock {
+    game_hour: f64,
+    night: bool,
+    game_hours_per_real_hour: f64,
+    night_start: f64,
+    night_end: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Reference {
+    bases: Vec<BaseRef>,
+    species: Vec<SpeciesRef>,
+    baits: Vec<BaitRef>,
+    clock: Clock,
+    bite_request_seconds: f64,
+    near_bottom_cm: f64,
+    default_bottom_cm: f64,
+}
+
+fn clock(world: &World) -> Clock {
+    Clock {
+        game_hour: advisor::game_hour(world),
+        night: advisor::is_night(world),
+        game_hours_per_real_hour: world.settings.fishing.game_hours_per_real_hour,
+        night_start: advisor::NIGHT_START_HOUR,
+        night_end: advisor::NIGHT_END_HOUR,
+    }
+}
+
+/// What the pages name and look up: bases and their locations, fish, baits.
+fn reference(world: &World) -> Reference {
+    let settings = &world.settings;
+    let bases: Vec<BaseRef> = settings
+        .bases
+        .iter()
+        .map(|(id, base)| BaseRef {
+            id: *id,
+            name: base_name(world, *id),
+            min_level: base.min_level,
+            locations: base.locations.iter().filter(|location| **location != 0).map(|location| LocationRef { id: *location, name: location_name(world, *location) }).collect(),
+        })
+        .collect();
+    let largest = world.fish.largest_share();
+    let market = &settings.fish_market;
+    let mut species: Vec<SpeciesRef> = world
+        .fish
+        .all()
+        .map(|one| {
+            let per_kg = market.base_price_per_kg * (largest / one.share).sqrt();
+            let mut locations: Vec<i32> = world.fish.by_location.iter().filter(|(_, ids)| ids.contains(&one.id)).map(|(location, _)| *location).collect();
+            locations.sort_unstable();
+            SpeciesRef {
+                id: one.id,
+                name: one.name.clone(),
+                small_grams: one.small_grams,
+                large_grams: one.large_grams,
+                trophy_grams: one.trophy_grams,
+                top_grams: f64::from(one.trophy_grams) * settings.fishing.top_weight_factor,
+                min_depth_cm: one.min_depth_cm,
+                max_depth_cm: one.max_depth_cm,
+                near_bottom: one.near_bottom,
+                likes_depth: one.likes_depth,
+                night_factor: one.night_factor,
+                price_per_kg: [per_kg, per_kg * market.large_price_factor, per_kg * market.trophy_price_factor].map(|price| price.round() / 100.0),
+                baits: one.baits.clone(),
+                locations,
+            }
+        })
+        .collect();
+    species.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut baits: Vec<BaitRef> = advisor::known_baits(world)
+        .into_iter()
+        .map(|item| BaitRef {
+            id: item.id,
+            name: item_name(world, item.id),
+            kind: item.kind,
+            price: item.cost as f64 / 100.0,
+            pack: item.shop_count.max(1),
+            level: advisor::level_of(item),
+            sold_at: bases.iter().map(|base| base.id).filter(|base| advisor::buyable(world, *base, i32::MAX, item.id)).collect(),
+        })
+        .collect();
+    baits.sort_by(|a, b| a.name.cmp(&b.name));
+    Reference {
+        bases,
+        species,
+        baits,
+        clock: clock(world),
+        bite_request_seconds: advisor::BITE_REQUEST_SECONDS,
+        near_bottom_cm: settings.fishing.near_bottom_cm,
+        default_bottom_cm: DEFAULT_BOTTOM_CM,
+    }
+}
+
+/// Where the bait is taken to lie without a cast to measure the place.
+const DEFAULT_BOTTOM_CM: f64 = 200.0;
+/// Rows the advisor sends at most.
+const MOST_ROWS: usize = 400;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Scope {
+    /// The baits the character carries.
+    Mine,
+    /// Those and what the base's shops sell the character.
+    Shop,
+    /// Every bait some fish takes.
+    All,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Goal {
+    Money,
+    Experience,
+    Bites,
+    Trophies,
+}
+
+struct AdviceQuery {
+    character: Option<i64>,
+    /// None: every base.
+    base: Option<Option<i32>>,
+    /// The phases to work out: day, night or both; None: as it is now.
+    nights: Option<Vec<bool>>,
+    bottom: f64,
+    scope: Scope,
+    /// Some(None): no tackle limit; Some(bag): that rod's; None: the best rod for the bait.
+    tackle: Option<Option<i32>>,
+    bait: Option<i32>,
+    species: Option<i32>,
+    goal: Goal,
+    every_depth: bool,
+}
+
+fn advice_query(args: &HashMap<&str, &str>) -> AdviceQuery {
+    let text = |key: &str| args.get(key).copied().unwrap_or("");
+    let number = |key: &str| text(key).parse::<i64>().ok();
+    AdviceQuery {
+        character: number("character"),
+        base: match text("base") {
+            "all" => Some(None),
+            other => other.parse().ok().map(Some),
+        },
+        nights: match text("time") {
+            "day" => Some(vec![false]),
+            "night" => Some(vec![true]),
+            "both" => Some(vec![false, true]),
+            _ => None,
+        },
+        bottom: text("bottom").parse::<f64>().ok().filter(|bottom| (10.0..=3000.0).contains(bottom)).unwrap_or(DEFAULT_BOTTOM_CM),
+        scope: match text("scope") {
+            "mine" => Scope::Mine,
+            "all" => Scope::All,
+            _ => Scope::Shop,
+        },
+        tackle: match text("tackle") {
+            "none" => Some(None),
+            other => other.parse().ok().map(Some),
+        },
+        bait: number("bait").map(|bait| bait as i32),
+        species: number("species").map(|species| species as i32),
+        goal: match text("goal") {
+            "experience" => Goal::Experience,
+            "bites" => Goal::Bites,
+            "trophies" => Goal::Trophies,
+            _ => Goal::Money,
+        },
+        every_depth: text("depths") == "all",
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ForecastRow {
-    location_name: String,
-    bait_name: String,
+    /// Depth and bottom come from the character's last cast there.
+    measured: bool,
+    /// No rod of the character's takes the bait; worked out without a limit.
+    no_rod: bool,
+    /// What the tackle holds, none without a limit.
+    limit_grams: Option<f64>,
     #[serde(flatten)]
     forecast: Forecast,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Advice {
-    character: String,
+struct Who {
+    id: i64,
+    name: String,
+    level: i32,
+    money: f64,
+    vip: bool,
     online: bool,
     base: i32,
-    base_name: String,
-    bases: Vec<(i32, String)>,
-    night: bool,
+    location: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Advice {
+    character: Who,
+    rods: Vec<Rod>,
+    /// Bait template to pieces carried.
+    owned: BTreeMap<i32, i32>,
+    /// The base worked out, none for every base.
+    base: Option<i32>,
+    nights: Vec<bool>,
+    clock: Clock,
     rows: Vec<ForecastRow>,
 }
 
-async fn advise(world: &World, id: i64, base: Option<i32>, night: Option<bool>) -> Result<String> {
+fn score(goal: Goal, species: Option<i32>, forecast: &Forecast) -> f64 {
+    let per_bite = match (species, goal) {
+        (Some(species), _) => forecast.share_of(species),
+        (None, Goal::Money) => forecast.money,
+        (None, Goal::Experience) => forecast.experience,
+        (None, Goal::Bites) => 1.0,
+        (None, Goal::Trophies) => forecast.trophies,
+    };
+    forecast.chance * per_bite
+}
+
+async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
+    let id = match query.character {
+        Some(id) => id,
+        None => match world.live().first() {
+            Some(live) => live.data.id,
+            None => world.store.all_characters().await?.first().map(|summary| summary.id).ok_or_else(|| anyhow::anyhow!("no characters"))?,
+        },
+    };
     let live = world.live_one(id);
     let data = match &live {
         Some(live) => live.data.clone(),
         None => world.store.load_character(id).await?.ok_or_else(|| anyhow::anyhow!("no character {id}"))?,
     };
-    let base = base.or(live.as_ref().map(|live| live.base).filter(|base| *base > 0)).unwrap_or(1);
-    let night = night.unwrap_or_else(|| advisor::is_night(world));
-    let baits = advisor::baits_of(world, &data);
-    let locations = world.settings.bases.get(&base).map(|found| found.locations.clone()).unwrap_or_default();
+    let here = live.as_ref().map_or(1, |live| live.base).max(1);
+    let base = query.base.unwrap_or(Some(here));
+    let nights = query.nights.clone().unwrap_or_else(|| vec![advisor::is_night(world)]);
+    let rods = advisor::rods(world, &data);
+    let owned = advisor::baits_of(world, &data);
+    let all_baits = advisor::known_baits(world);
+
+    let bases: Vec<i32> = match base {
+        Some(base) => vec![base],
+        None => world.settings.bases.keys().copied().collect(),
+    };
     let mut rows = Vec::new();
-    for location in locations.into_iter().filter(|location| *location != 0) {
-        let cast = live.as_ref().and_then(|live| live.casts.get(&location));
-        for bait in &baits {
-            let forecast = advisor::forecast(world, &data, base, location, *bait, cast, night);
-            if forecast.chance > 0.0 {
-                rows.push(ForecastRow { location_name: location_name(world, location), bait_name: item_name(world, *bait), forecast });
+    for base in bases {
+        let baits: Vec<(i32, i32)> = all_baits
+            .iter()
+            .filter(|item| query.bait.is_none_or(|wanted| wanted == item.id))
+            .filter(|item| match query.scope {
+                Scope::Mine => owned.contains_key(&item.id),
+                Scope::Shop => owned.contains_key(&item.id) || advisor::buyable(world, base, data.level, item.id),
+                Scope::All => true,
+            })
+            .map(|item| (item.id, item.kind))
+            .collect();
+        let locations = world.settings.bases.get(&base).map(|found| found.locations.clone()).unwrap_or_default();
+        for location in locations.into_iter().filter(|location| *location != 0) {
+            if query.species.is_some_and(|species| !world.fish.by_location.get(&location).is_some_and(|ids| ids.contains(&species))) {
+                continue;
+            }
+            let cast = live.as_ref().filter(|live| live.base == base).and_then(|live| live.casts.get(&location)).copied();
+            let bottom = cast.map_or(query.bottom, |cast| cast.bottom);
+            let depths = advisor::depths(world, location, bottom);
+            for (bait, bait_kind) in &baits {
+                if !advisor::bites_at(world, location, *bait) {
+                    continue;
+                }
+                let fitting: Vec<&Rod> = rods.iter().filter(|rod| advisor::takes(rod.kind, *bait_kind)).collect();
+                let (tackle, no_rod) = match query.tackle {
+                    Some(None) => (Tackle::NONE, false),
+                    Some(Some(bag)) => match rods.iter().find(|rod| rod.bag == bag) {
+                        Some(rod) if advisor::takes(rod.kind, *bait_kind) => (Tackle::of(rod), false),
+                        _ => continue,
+                    },
+                    None => match fitting.iter().max_by(|a, b| a.limit_grams.unwrap_or(f64::INFINITY).total_cmp(&b.limit_grams.unwrap_or(f64::INFINITY))) {
+                        Some(rod) => (Tackle::of(rod), false),
+                        None => (Tackle::NONE, true),
+                    },
+                };
+                let limit = tackle.landed.is_finite().then_some(tackle.landed);
+                for night in &nights {
+                    let mut found: Vec<Forecast> = depths
+                        .iter()
+                        .map(|depth| {
+                            let spot = Spot { base, location, depth: *depth, bottom, night: *night };
+                            advisor::forecast(world, &data, spot, *bait, tackle)
+                        })
+                        .filter(|forecast| forecast.chance > 0.0)
+                        .filter(|forecast| query.species.is_none_or(|species| forecast.share_of(species) > 0.0))
+                        .collect();
+                    if !query.every_depth {
+                        found.sort_by(|a, b| score(query.goal, query.species, b).total_cmp(&score(query.goal, query.species, a)));
+                        found.truncate(1);
+                    }
+                    rows.extend(found.into_iter().map(|forecast| ForecastRow { measured: cast.is_some(), no_rod, limit_grams: limit, forecast }));
+                }
             }
         }
     }
+    rows.sort_by(|a, b| score(query.goal, query.species, &b.forecast).total_cmp(&score(query.goal, query.species, &a.forecast)));
+    rows.truncate(MOST_ROWS);
     let advice = Advice {
-        character: data.name.clone(),
-        online: live.is_some(),
+        character: Who {
+            id: data.id,
+            name: data.name.clone(),
+            level: data.level,
+            money: data.money as f64 / 100.0,
+            vip: data.vip,
+            online: live.is_some(),
+            base: here,
+            location: live.as_ref().map_or(0, |live| live.location),
+        },
+        rods,
+        owned,
         base,
-        base_name: base_name(world, base),
-        bases: world.settings.bases.keys().map(|base| (*base, base_name(world, *base))).collect(),
-        night,
+        nights,
+        clock: clock(world),
         rows,
     };
     Ok(serde_json::to_string(&advice)?)
