@@ -5,7 +5,8 @@
 //! opens the window: int tasks taken, int most at once, date of new offers,
 //! then the offers until the end (see [`write_offer`]). «Принять» sends 710
 //! with the offer; the answer is one `key=value` line: `ok=1`, or `no_task`,
-//! `no_repa`, `no_get`, `big_count`, `no_time_period`. «Отказаться» sends 705
+//! `no_repa`, `no_get`, `big_count`, `no_time_period` (each with "=1": see
+//! [`super::keyed`]). «Отказаться» sends 705
 //! with the tab and gives up its tasks.
 //!
 //! Taken tasks are the client's top-right list: 675 replaces it, 680 adds or
@@ -409,8 +410,9 @@ pub async fn open(session: &mut Session, message: &AfcMessage) -> Result<Outcome
 }
 
 async fn answer(conn: &Conn, text: &str) -> Result<Outcome> {
+    let text = super::keyed(text);
     let mut w = AfcWriter::new();
-    w.string(text);
+    w.string(&text);
     conn.send(msg::BOARD_TAKE, w.finish()).await?;
     conn.log(&format!("   -> 710 {text}"));
     Ok(Outcome::Answered)

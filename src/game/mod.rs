@@ -141,6 +141,13 @@ pub struct Player {
 
 pub use crate::world::LastCast;
 
+/// A one-line answer the client reads as `key=value`: it splits the line at
+/// '=' and takes what is before it as the key, so a bare word (no '=') comes
+/// out as the key "-" and is never recognised. A bare word gets a value.
+pub(crate) fn keyed(text: &str) -> String {
+    if text.contains('=') { text.to_owned() } else { format!("{text}=1") }
+}
+
 impl Player {
     fn new(data: CharacterData) -> Self {
         let now = Instant::now();

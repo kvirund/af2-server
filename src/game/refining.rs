@@ -4,7 +4,7 @@
 use anyhow::Result;
 use rand::random;
 
-use super::{Conn, Outcome, Session, active, inventory, perks, vitals};
+use super::{Conn, Outcome, Session, active, inventory, keyed, perks, vitals};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::messages as msg;
 
@@ -35,15 +35,16 @@ fn roll(outputs: &[(i32, i32, f64)], bonus: f64, mut percent: impl FnMut() -> f6
 }
 
 async fn reply(conn: &Conn, text: &str) -> Result<Outcome> {
+    let text = keyed(text);
     let mut w = AfcWriter::new();
-    w.string(text);
+    w.string(&text);
     conn.send(msg::REFINE, w.finish()).await?;
     conn.log(&format!("   -> {} {text}", msg::REFINE));
     Ok(Outcome::Answered)
 }
 
 /// Client: long item id, after the window's two-second bar. Reply case 290, one
-/// key: "result=item/count,..." adds to the list in the window, "noresult" adds
+/// key (every key with "=", see [`keyed`]): "result=item/count,..." adds to the list in the window, "noresult" adds
 /// nothing; both start the bar again for the next piece. "isend" closes the
 /// window quietly, "nowpn", "noworkpoints" and "norefine" close it with an error.
 /// So the window keeps going until the stack is gone or the work points run out.
@@ -101,6 +102,12 @@ pub async fn refine(session: &mut Session, message: &AfcMessage) -> Result<Outco
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_reply_has_a_key_the_client_reads() {
+        assert_eq!(keyed("isend"), "isend=1");
+        assert_eq!(keyed("result=1012/20"), "result=1012/20");
+    }
 
     #[test]
     fn outputs_are_read_from_the_refine_line() {
