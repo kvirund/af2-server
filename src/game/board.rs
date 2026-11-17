@@ -748,6 +748,39 @@ mod tests {
         assert_eq!(baits_for(&catalog, &roach, None), vec![1012, 1018]);
     }
 
+    /// The same over the real tables: fish come from `config/fish.json`, built
+    /// from player guides, and bait sizes from `data/items.json`, read out of
+    /// the player's own copy of the game. That copy is not in the repository,
+    /// so where it is missing there is nothing to check.
+    #[test]
+    fn no_offered_bait_is_bigger_than_the_fish_it_names() {
+        let root = std::path::Path::new(".");
+        let data_dir = root.join("data");
+        if !["items.json", "recipes.json", "skills.json"].iter().all(|name| data_dir.join(name).is_file()) {
+            return;
+        }
+        let data = crate::config::load(&root.join("config"), root).expect("the game data");
+        let top = data.settings.fishing.top_weight_factor;
+        let mut without_bait = Vec::new();
+        for species in data.fish.all() {
+            for bait in baits_for(&data.catalog, species, None) {
+                let item = data.catalog.get(bait).expect("the bait is in the catalog");
+                let min_grams = bait_min_grams(&item.xml);
+                let heaviest = f64::from(species.trophy_grams) * top;
+                assert!(
+                    heaviest >= min_grams,
+                    "{} grows to {heaviest} g at most, but a task may name it on {}, which nothing under {min_grams} g takes",
+                    species.name,
+                    item.name
+                );
+            }
+            if !species.baits.is_empty() && baits_for(&data.catalog, species, None).is_empty() {
+                without_bait.push(species.name.clone());
+            }
+        }
+        assert!(without_bait.is_empty(), "species a bait task can no longer name: {without_bait:?}");
+    }
+
     #[test]
     fn a_taken_offer_cannot_be_taken_again() {
         let board = BoardSettings { max_taken: 3, daily_cooldown_minutes: 40, ..Default::default() };
