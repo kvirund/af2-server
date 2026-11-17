@@ -1180,6 +1180,9 @@ impl FishTable {
     }
 }
 
+/// Some of these are carried over from the client's own table before anything
+/// reads them, so that one extraction serves whatever uses them later.
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct CatalogItem {
     pub id: i32,
@@ -1204,10 +1207,71 @@ pub struct CatalogItem {
     /// pieces], zeros for none.
     #[serde(default)]
     pub cost_item: [i32; 2],
+    /// The `costPt=` line: the price in ergs the game itself gives the item.
+    #[serde(default)]
+    pub cost_pt: i64,
+    /// Whether a shop buys the item back, whether the auction takes it, and
+    /// whether it takes one built from parts.
+    #[serde(default)]
+    pub sale_to_shop: bool,
+    #[serde(default)]
+    pub sale_to_auk: bool,
+    #[serde(default)]
+    pub wpn_to_auk: bool,
+    /// Whether the item wears at all, and what one use costs it; `defDur` in
+    /// the description is the whole of it, this is the step.
+    #[serde(default)]
+    pub wears: bool,
+    #[serde(default)]
+    pub wear: f64,
+    /// Slots for parts, on every item unlike the description's own tags.
+    #[serde(default)]
+    pub holes_min: i32,
+    #[serde(default)]
+    pub holes_max: i32,
+    #[serde(default)]
+    pub subtype: i32,
+    #[serde(default)]
+    pub view_type: i32,
+    /// Whether the item can be handed to another player.
+    #[serde(default)]
+    pub take_to_friend: bool,
     /// Price in ergs, the premium money, for an item with no price in credits:
     /// the `pricePt` of its description, set when the settings are applied.
     #[serde(skip)]
     pub premium_cost: i64,
+}
+
+impl Default for CatalogItem {
+    /// What the missing keys of `data/items.json` come to, so that a new field
+    /// of the client's table does not have to be written out everywhere.
+    fn default() -> Self {
+        Self {
+            id: 0,
+            kind: 0,
+            cost: 0,
+            durability: 1.0,
+            stacks: false,
+            shop_count: 1,
+            max_count: 1,
+            xml: String::new(),
+            refine: String::new(),
+            name: String::new(),
+            cost_item: [0, 0],
+            cost_pt: 0,
+            sale_to_shop: false,
+            sale_to_auk: false,
+            wpn_to_auk: false,
+            wears: false,
+            wear: 0.0,
+            holes_min: 0,
+            holes_max: 0,
+            subtype: 0,
+            view_type: 0,
+            take_to_friend: false,
+            premium_cost: 0,
+        }
+    }
 }
 
 /// A whole number in an item's description, such as `<pricePt>20</pricePt>`.
@@ -1389,6 +1453,7 @@ mod tests {
             refine: String::new(),
             name: String::new(),
             cost_item: [0, 0],
+            ..Default::default()
         };
         let prices = |mut item: CatalogItem| {
             shop.adjust(&mut item);
@@ -1416,6 +1481,7 @@ mod tests {
             refine: String::new(),
             name: String::new(),
             cost_item: [1179, 50],
+            ..Default::default()
         };
         let mut jigs = course(1540);
         skills.fix_course(&mut jigs);
@@ -1434,7 +1500,7 @@ mod tests {
             prices: [(5, 1000)].into(),
             ..Default::default()
         };
-        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0] };
+        let item = |id, kind| CatalogItem { id, kind, cost: 100, durability: 1.0, stacks: false, shop_count: 1, max_count: 1, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0], ..Default::default() };
         let cost = |mut item: CatalogItem| {
             shop.adjust(&mut item);
             item.cost

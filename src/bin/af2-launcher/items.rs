@@ -28,6 +28,26 @@ struct Item {
     /// The `costWpn=` line: pieces of another item asked on top of the price,
     /// [item, pieces], or zeros.
     cost_item: [i32; 2],
+    /// The `costPt=` line: the price in ergs.
+    cost_pt: i64,
+    /// Whether a shop buys the item back, whether the auction takes it, and
+    /// whether it takes one that was built from parts.
+    sale_to_shop: bool,
+    sale_to_auk: bool,
+    wpn_to_auk: bool,
+    /// Whether the item wears at all (`isiznos=`) and what one use costs it
+    /// (`iznos=`); `defDur` is the whole of it, this is the step.
+    wears: bool,
+    wear: f64,
+    /// Slots for parts: the `holes_min=` and `holes_max=` lines.
+    holes_min: i32,
+    holes_max: i32,
+    /// The `subtype=` and `viewType=` lines. The description carries the same
+    /// two, but only for some items; these are on every one.
+    subtype: i32,
+    view_type: i32,
+    /// Whether the item can be handed to another player.
+    take_to_friend: bool,
 }
 
 fn pattern(text: &str) -> Regex {
@@ -53,9 +73,15 @@ fn definitions_text(assets: &[u8]) -> Result<String> {
     Ok(String::from_utf8_lossy(&assets[start..end]).replace('\r', ""))
 }
 
-/// A number from the definitions; the game leaves unset fields empty.
+/// A number from the definitions; the game leaves unset fields empty and
+/// writes the fractional ones with a comma.
 fn number(value: Option<&str>) -> Result<f64, std::num::ParseFloatError> {
-    value.map(str::trim).filter(|text| !text.is_empty()).unwrap_or("0").parse()
+    value.map(str::trim).filter(|text| !text.is_empty()).unwrap_or("0").replace(',', ".").parse()
+}
+
+/// A `0`/`1` line of the definitions.
+fn flag(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1"))
 }
 
 fn extract(assets: &[u8]) -> Result<Vec<Item>> {
@@ -67,6 +93,17 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
     let refine = pattern(r"(?m)^refine=(.*)$");
     let name = pattern(r"(?m)^iname=(.*)$");
     let cost_wpn = pattern(r"(?m)^costWpn=(.*)$");
+    let cost_pt = pattern(r"(?m)^costPt=(.*)$");
+    let sale_to_shop = pattern(r"(?m)^saleToShop=(.*)$");
+    let sale_to_auk = pattern(r"(?m)^saleToAuk=(.*)$");
+    let wpn_to_auk = pattern(r"(?m)^wpnToAuk=(.*)$");
+    let wears = pattern(r"(?m)^isiznos=(.*)$");
+    let wear = pattern(r"(?m)^iznos=(.*)$");
+    let holes_min = pattern(r"(?m)^holes_min=(.*)$");
+    let holes_max = pattern(r"(?m)^holes_max=(.*)$");
+    let subtype = pattern(r"(?m)^subtype=(.*)$");
+    let view_type = pattern(r"(?m)^viewType=(.*)$");
+    let take_to_friend = pattern(r"(?m)^takeToFrend=(.*)$");
     let definition = pattern(r"(?s)<wpn_add.*?</wpn_add>");
     let durability = pattern(r"(?s)<defDur>(.*?)</defDur>");
     let line_breaks = pattern(r"\\[rn]");
@@ -103,6 +140,17 @@ fn extract(assets: &[u8]) -> Result<Vec<Item>> {
             refine: capture(&refine, block).unwrap_or("").trim().to_string(),
             name: capture(&name, block).unwrap_or("").trim().to_string(),
             cost_item: item_price(capture(&cost_wpn, block).unwrap_or("")),
+            cost_pt: number(capture(&cost_pt, block)).context("цена предмета в эргах")? as i64,
+            sale_to_shop: flag(capture(&sale_to_shop, block)),
+            sale_to_auk: flag(capture(&sale_to_auk, block)),
+            wpn_to_auk: flag(capture(&wpn_to_auk, block)),
+            wears: flag(capture(&wears, block)),
+            wear: number(capture(&wear, block)).context("износ предмета")?,
+            holes_min: number(capture(&holes_min, block)).context("меньшее число ячеек")? as i32,
+            holes_max: number(capture(&holes_max, block)).context("большее число ячеек")? as i32,
+            subtype: number(capture(&subtype, block)).context("подвид предмета")? as i32,
+            view_type: number(capture(&view_type, block)).context("вид показа предмета")? as i32,
+            take_to_friend: flag(capture(&take_to_friend, block)),
         });
     }
     Ok(items)
@@ -118,7 +166,7 @@ fn item_price(text: &str) -> [i32; 2] {
 }
 
 /// A file without this field was made by an older version and is made again.
-const CURRENT_FIELD: &str = "\"cost_item\"";
+const CURRENT_FIELD: &str = "\"sale_to_shop\"";
 
 /// Does nothing once the file exists: it only depends on the installed game.
 pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
@@ -142,7 +190,7 @@ pub fn ensure_extracted(game: &Path, data_dir: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\niname=Box\r\ncostWpn=1179/60/0\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
+    const ASSETS: &[u8] = b"junk#head\nid=7\r\nwtype=10\r\ncostCr=12.5\r\nrefine=1391/1/100\r\niname=Box\r\ncostWpn=1179/60/0\r\ncostPt=0\r\nsaleToShop=1\r\nsaleToAuk=0\r\nwpnToAuk=0\r\nisiznos=1\r\niznos=0,01\r\nholes_min=0\r\nholes_max=2\r\nsubtype=3\r\nviewType=34\r\ntakeToFrend=1\r\naddpar=<wpn_add>\\r\\n<base> <name>x</name></base> <defDur>2.5</defDur></wpn_add>\nwpnend=1\nid=8\nwtype=3\naddpar=<wpn_add><base></base></wpn_add>\nwpnend=1\nend";
 
     #[test]
     fn extracts_every_field() {
@@ -160,6 +208,17 @@ mod tests {
             refine: "1391/1/100".into(),
             name: "Box".into(),
             cost_item: [1179, 60],
+            cost_pt: 0,
+            sale_to_shop: true,
+            sale_to_auk: false,
+            wpn_to_auk: false,
+            wears: true,
+            wear: 0.01,
+            holes_min: 0,
+            holes_max: 2,
+            subtype: 3,
+            view_type: 34,
+            take_to_friend: true,
         });
     }
 
@@ -175,6 +234,8 @@ mod tests {
     fn missing_fields_get_defaults() {
         let items = extract(ASSETS).unwrap();
         assert_eq!((items[1].cost, items[1].durability, items[1].stacks), (0, 1.0, false));
+        assert_eq!((items[1].cost_pt, items[1].wear, items[1].holes_max), (0, 0.0, 0));
+        assert!(!items[1].sale_to_shop && !items[1].wears && !items[1].take_to_friend);
     }
 
     #[test]

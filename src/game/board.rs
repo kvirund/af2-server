@@ -702,6 +702,7 @@ mod tests {
             refine: String::new(),
             name: String::new(),
             cost_item: [0, 0],
+            ..Default::default()
         }
     }
 
@@ -756,7 +757,16 @@ mod tests {
     fn no_offered_bait_is_bigger_than_the_fish_it_names() {
         let root = std::path::Path::new(".");
         let data_dir = root.join("data");
-        if !["items.json", "recipes.json", "skills.json"].iter().all(|name| data_dir.join(name).is_file()) {
+        let missing: Vec<_> = ["items.json", "recipes.json", "skills.json"]
+            .into_iter()
+            .filter(|name| !data_dir.join(name).is_file())
+            .collect();
+        if !missing.is_empty() {
+            eprintln!(
+                "warning: data/{} missing, so the real tables went unchecked. They are read out of                  your own copy of the game; extract them with:
+                     cargo run --release --bin af2-launcher -- --server local --no-launch",
+                missing.join(", data/")
+            );
             return;
         }
         let data = crate::config::load(&root.join("config"), root).expect("the game data");
