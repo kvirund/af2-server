@@ -425,8 +425,11 @@ function baitChip(id, base) {
 }
 const timeTag = (night) => night ? `<span class="time-tag is-night">${icon('moon')}ночью</span>` : `<span class="time-tag is-day">${icon('sun')}днём</span>`;
 function depthText(row) {
-  const bottom = `дно ${meters(row.bottom)}${row.measured ? '' : '?'}`;
-  return row.depth >= row.bottom ? `у дна · ${bottom}` : `${meters(row.depth)} · ${bottom}`;
+  const above = row.bottom - row.depth;
+  const where = above <= 0 ? 'на дне' : above <= 100 ? `${n0.format(above)} см над дном` : `на глубине ${meters(row.depth)}`;
+  const bottom = row.measured ? `глубина ${meters(row.bottom)}` : `глубина не измерена, беру ${meters(row.bottom)}`;
+  const tip = row.measured ? 'Глубина из твоего последнего заброса на этой локации.' : 'Ты здесь ещё не забрасывал: глубину берём из «Как это считается» внизу страницы. Сделай заброс — и будет настоящая.';
+  return `<span title="${esc(tip)}">${where} · ${row.measured ? bottom : `<span class="muted">${bottom}</span>`}</span>`;
 }
 
 /* Clock */
@@ -528,7 +531,7 @@ function speciesTable(row, color) {
 function methodNote() {
   return `<details class="card note"><summary>Как это считается</summary>
     <p>Сервер считает прогноз теми же функциями, что и настоящую поклёвку: какие рыбы есть на локации, кто берёт эту наживку на этой глубине днём или ночью, шанс поклёвки с привлекательностью наживки и навыками, вес с удачей, цену у скупщика и опыт с образованием, репутацией базы и VIP персонажа.</p>
-    <p>Снасть: клиент отпускает рыбу тяжелее 2,5 × самого слабого из тестов удилища и лески — такая рыба считается сошедшей. Глубина: пробуются «у дна» и глубины, ниже которых часть рыб не берёт; показана лучшая. Дно — из последнего заброса персонажа на этой локации, а где он не забрасывал (со знаком «?») — <input class="num-input" type="number" min="10" max="3000" step="10" data-pick="bottom" value="${esc(state.bottom)}"> см.</p>
+    <p>Снасть: клиент отпускает рыбу тяжелее 2,5 × самого слабого из тестов удилища и лески — такая рыба считается сошедшей. Глубина: пробуются «на дне», чуть выше досягаемости донной рыбы (у дна она клюёт в 2,5 раза чаще, выше — втрое реже, и доля остальных растёт) и глубины, ниже которых часть рыб не берёт; показана лучшая для цели. Дно — из последнего заброса персонажа на этой локации, а где он не забрасывал (со знаком «?») — <input class="num-input" type="number" min="10" max="3000" step="10" data-pick="bottom" value="${esc(state.bottom)}"> см.</p>
     <p>В час: клиент спрашивает поклёвку раз в ${n0.format(W().biteRequestSeconds)} с, и на вываживание с новым забросом уходит <input class="num-input" type="number" min="0" max="300" step="1" data-pick="fight" value="${esc(state.fight)}"> с.</p>
   </details>`;
 }

@@ -202,11 +202,21 @@ pub fn bites_at(world: &World, location: i32, bait: i32) -> bool {
         .is_some_and(|ids| ids.iter().filter_map(|id| world.fish.get(*id)).any(|species| species.baits.is_empty() || species.baits.contains(&bait)))
 }
 
-/// Depths worth trying at a place with this bottom: on the bottom, and at the
-/// deepest some fish of the place still takes when that is above the bottom.
+/// How far above `nearBottomCm` the bait is lifted to keep off the bottom fish.
+const OFF_BOTTOM_MARGIN_CM: f64 = 10.0;
+
+/// Depths worth trying at a place with this bottom: on the bottom; just above
+/// the bottom fish's reach when the place has some, so they bite less and the
+/// others take a bigger share; and at the deepest some fish of the place still
+/// takes when that is above the bottom.
 pub fn depths(world: &World, location: i32, bottom: f64) -> Vec<f64> {
     let mut depths = vec![bottom];
-    for species in world.fish.by_location.get(&location).into_iter().flatten().filter_map(|id| world.fish.get(*id)) {
+    let here: Vec<_> = world.fish.by_location.get(&location).into_iter().flatten().filter_map(|id| world.fish.get(*id)).collect();
+    let off_bottom = bottom - world.settings.fishing.near_bottom_cm - OFF_BOTTOM_MARGIN_CM;
+    if off_bottom > 0.0 && here.iter().any(|species| species.near_bottom) {
+        depths.push(off_bottom);
+    }
+    for species in here {
         let deepest = f64::from(species.max_depth_cm);
         if species.max_depth_cm > 0 && deepest < bottom {
             depths.push(deepest);
