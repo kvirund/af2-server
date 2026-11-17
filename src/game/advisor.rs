@@ -265,8 +265,8 @@ impl Tackle {
 }
 
 /// What casting this bait at the spot brings the character with the tackle.
-/// A bite request lets small fish at the bait `smallFishNibbleShare` of the
-/// time, so the forecast mixes both kinds of request the same way.
+/// Fish lighter than the bait's size come off instead of taking the hook
+/// (`drop_chance`), so the samples let them go and the chance falls with them.
 pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32, tackle: Tackle) -> Forecast {
     let max_grams = tackle.server;
     let settings = &world.settings;
@@ -280,21 +280,20 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
     let experience_factor = vip::multiplier(character, settings.vip.experience_percent);
     let price_factor = vip::multiplier(character, settings.vip.fish_price_percent);
 
-    let nibble_share = settings.fishing.small_fish_nibble_share;
+    let samples = SAMPLES as f64;
     let mut sums: Vec<(i32, Sum)> = Vec::new();
-    let mut chance = 0.0;
-    for (nibble, share) in [(false, 1.0 - nibble_share), (true, nibble_share)] {
-        let Odds { chance: this_chance, options, total, min_grams, luck } = fishing::odds(world, character, &attempt, nibble);
-        if options.is_empty() || total <= 0.0 {
-            continue;
-        }
-        chance += share * this_chance;
+    let Odds { chance: bite_chance, options, total, min_grams, luck } = fishing::odds(world, character, &attempt);
+    if total > 0.0 {
         for (species, weight) in &options {
-            let part = share * this_chance * weight / total;
             let mut sum = Sum::default();
+            let mut hooked = 0.0;
             for _ in 0..SAMPLES {
-                let rolled = roll_weight(&settings.fishing, species, depth, min_grams, luck, random(), random());
-                let (grams, size_class) = fit_to_tackle(species, rolled, min_grams, max_grams, random());
+                let rolled = roll_weight(&settings.fishing, species, depth, luck, random(), random());
+                let (grams, size_class) = fit_to_tackle(species, rolled, max_grams, random());
+                if random::<f64>() < fishing::drop_chance(min_grams, f64::from(grams)) {
+                    continue;
+                }
+                hooked += 1.0;
                 sum.all_grams += f64::from(grams);
                 if f64::from(grams) > tackle.landed {
                     continue;
@@ -305,24 +304,26 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
                 sum.experience += f64::from(experience_for(&settings.progression, grams, size_class, education)) * experience_factor;
                 sum.trophies += f64::from(u8::from(size_class == fishing::TROPHY_CLASS));
             }
-            let samples = SAMPLES as f64;
-            let index = match sums.iter().position(|(id, _)| *id == species.id) {
-                Some(index) => index,
-                None => {
-                    sums.push((species.id, Sum::default()));
-                    sums.len() - 1
-                }
-            };
-            let found = &mut sums[index].1;
-            found.share += part;
-            found.landed += part * sum.landed / samples;
-            found.grams += part * sum.grams / samples;
-            found.all_grams += part * sum.all_grams / samples;
-            found.money += part * sum.money / samples;
-            found.experience += part * sum.experience / samples;
-            found.trophies += part * sum.trophies / samples;
+            if hooked <= 0.0 {
+                continue;
+            }
+            // The fish that came off are not bites: the species' share falls with them.
+            let part = bite_chance * weight / total * hooked / samples;
+            sums.push((
+                species.id,
+                Sum {
+                    share: part,
+                    grams: part * sum.grams / hooked,
+                    all_grams: part * sum.all_grams / hooked,
+                    landed: part * sum.landed / hooked,
+                    money: part * sum.money / hooked,
+                    experience: part * sum.experience / hooked,
+                    trophies: part * sum.trophies / hooked,
+                },
+            ));
         }
     }
+    let chance: f64 = sums.iter().map(|(_, sum)| sum.share).sum();
 
     let mut species: Vec<SpeciesForecast> = sums
         .into_iter()

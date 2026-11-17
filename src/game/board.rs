@@ -21,7 +21,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use rand::random;
 
-use super::fishing::{LARGE_CLASS, TROPHY_CLASS, experience_for};
+use super::fishing::{LARGE_CLASS, TROPHY_CLASS, bait_min_grams, drop_chance, experience_for};
 use super::{Conn, Outcome, Player, Session, active, character, chat, inventory, keepnet, reputation, tournaments, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BoardSettings, Catalog, FishTable, Settings, Species, UnionBoard};
@@ -154,10 +154,23 @@ fn resource_items(board: &BoardSettings, base: i32) -> Vec<i32> {
     items
 }
 
-/// The baits of a species a union's task may name: all, or those of its kind.
+/// A task on a bait the species' usual fish come off of this often or more is
+/// not offered (invented: the client lets fish lighter than the bait's size go).
+const MOST_DROPPED: f64 = 0.5;
+
+/// The baits of a species a union's task may name: all, or those of its kind,
+/// and none its usual fish are too small for.
 fn baits_for(catalog: &Catalog, species: &Species, union: Option<&UnionBoard>) -> Vec<i32> {
     let kind = union.map_or(0, |union| union.bait_kind);
-    species.baits.iter().copied().filter(|bait| kind == 0 || catalog.get(*bait).is_some_and(|item| item.kind == kind)).collect()
+    let usual = f64::from(species.small_grams + species.large_grams) / 2.0;
+    species
+        .baits
+        .iter()
+        .copied()
+        .filter(|bait| {
+            catalog.get(*bait).is_some_and(|item| (kind == 0 || item.kind == kind) && drop_chance(bait_min_grams(&item.xml), usual) < MOST_DROPPED)
+        })
+        .collect()
 }
 
 /// Whether a union's rods catch the species.
@@ -723,6 +736,16 @@ mod tests {
         assert!(!fits_union(&catalog, &pike, &bottom));
         assert_eq!(baits_for(&catalog, &pike, Some(&spinners)), vec![2001]);
         assert_eq!(baits_for(&catalog, &pike, None), vec![1010, 2001]);
+    }
+
+    #[test]
+    fn no_task_asks_for_a_bait_too_big_for_the_fish() {
+        let sized = |id, size: &str| crate::config::CatalogItem { xml: format!("<basePar>100/{size}/0</basePar>"), ..bait(id, 10) };
+        let catalog = Catalog::new(vec![sized(1018, "0"), sized(1012, "1")]);
+        let bleak = Species { small_grams: 31, large_grams: 37, trophy_grams: 145, ..species(112, false, vec![1012, 1018]) };
+        let roach = Species { small_grams: 59, large_grams: 427, trophy_grams: 1501, ..species(77, false, vec![1012, 1018]) };
+        assert_eq!(baits_for(&catalog, &bleak, None), vec![1018]);
+        assert_eq!(baits_for(&catalog, &roach, None), vec![1012, 1018]);
     }
 
     #[test]

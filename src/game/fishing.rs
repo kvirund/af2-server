@@ -31,6 +31,10 @@ const DEPTH_OFFSET: usize = 4 + 24 + 24;
 /// item's `basePar`. The client dips the float once for anything lighter, with
 /// no bite to set the hook on. Other classes have no minimum.
 const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
+/// How often a fish lighter than the bait's size comes off, against how many
+/// times lighter it is: one half the bait's size comes off a fifth of the time.
+/// Invented: the real rule is recorded nowhere.
+const DROP_PERCENT: f64 = 20.0;
 /// Cells of a rod's bag holding the rod, reel and line.
 const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
 pub const NIGHT_START_HOUR: f64 = 21.5;
@@ -68,20 +72,20 @@ pub struct Odds<'a> {
     pub chance: f64,
     pub options: Vec<(&'a Species, f64)>,
     pub total: f64,
+    /// The bait's size: lighter fish come off it (`drop_chance`).
     pub min_grams: f64,
     /// The trophy share's multiplier: luck and the base's reputation.
     pub luck: f64,
 }
 
-/// The same numbers for the bite request and the web advisor. `nibble`: this
-/// request lets small fish at the bait (`smallFishNibbleShare`).
-pub fn odds<'a>(world: &'a World, character: &CharacterData, cast: &Cast, nibble: bool) -> Odds<'a> {
+/// The same numbers for the bite request and the web advisor.
+pub fn odds<'a>(world: &'a World, character: &CharacterData, cast: &Cast) -> Odds<'a> {
     let all = &world.settings;
     let settings = &all.fishing;
     let bait_item = cast.bait.and_then(|template| world.catalog.get(template));
-    let min_grams = if nibble { 0.0 } else { bait_item.map_or(0.0, |item| bait_min_grams(&item.xml)) };
+    let min_grams = bait_item.map_or(0.0, |item| bait_min_grams(&item.xml));
     let conditions =
-        Conditions { bait: cast.bait, min_grams, max_grams: cast.max_grams, depth: cast.depth, bottom: cast.bottom, night: cast.night };
+        Conditions { bait: cast.bait, max_grams: cast.max_grams, depth: cast.depth, bottom: cast.bottom, night: cast.night };
     let mut options = candidates(&world.fish, settings, cast.location, &conditions);
     for (species, weight) in &mut options {
         *weight *= cards::bite_factor(&all.mastery, &character.catches, species.id);
@@ -99,7 +103,6 @@ pub fn odds<'a>(world: &'a World, character: &CharacterData, cast: &Cast, nibble
 
 struct Conditions {
     bait: Option<i32>,
-    min_grams: f64,
     /// What the tackle holds; infinite without a limit.
     max_grams: f64,
     depth: f64,
@@ -121,9 +124,6 @@ fn candidates<'a>(
                 && !species.baits.is_empty()
                 && !species.baits.contains(&bait)
             {
-                return None;
-            }
-            if f64::from(species.large_grams) < conditions.min_grams {
                 return None;
             }
             if f64::from(species.small_grams) > conditions.max_grams {
@@ -230,11 +230,11 @@ pub(super) fn size_class(species: &Species, grams: i32) -> i32 {
 }
 
 /// A fish too heavy for the tackle comes up again within what the tackle holds.
-pub(super) fn fit_to_tackle(species: &Species, rolled: (i32, i32), min_grams: f64, max_grams: f64, point: f64) -> (i32, i32) {
+pub(super) fn fit_to_tackle(species: &Species, rolled: (i32, i32), max_grams: f64, point: f64) -> (i32, i32) {
     if f64::from(rolled.0) <= max_grams {
         return rolled;
     }
-    let lightest = f64::from(species.small_grams).max(min_grams).min(max_grams);
+    let lightest = f64::from(species.small_grams).min(max_grams);
     let grams = lerp(lightest, max_grams, point);
     (grams, size_class(species, grams))
 }
@@ -245,6 +245,15 @@ pub(super) fn bait_min_grams(xml: &str) -> f64 {
         .and_then(|(_, rest)| rest.split('/').nth(1))
         .and_then(|class| class.parse::<usize>().ok());
     class.and_then(|class| BAIT_MIN_GRAMS.get(class).copied()).unwrap_or(0.0)
+}
+
+/// How often a fish of this weight comes off a bait of that size: the client
+/// dips the float once, and there is no bite to set the hook on.
+pub(super) fn drop_chance(min_grams: f64, grams: f64) -> f64 {
+    if grams >= min_grams {
+        return 0.0;
+    }
+    ((min_grams - grams) / (grams + 0.1) * DROP_PERCENT / 100.0).clamp(0.0, 1.0)
 }
 
 /// The bait's attractiveness, the first number of its `basePar`, as a share of
@@ -278,7 +287,7 @@ fn lure_bonus(settings: &Settings, levels: &BTreeMap<i32, i32>, bait_xml: Option
 }
 
 /// Returns grams and size class for two rolls in `0..1`.
-pub(super) fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, min_grams: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
+pub(super) fn roll_weight(settings: &FishingSettings, species: &Species, depth: f64, luck: f64, roll: f64, point: f64) -> (i32, i32) {
     let trophy_share = luck
         * if depth > settings.trophy_depth_cm {
             settings.trophy_share * settings.deep_trophy_multiplier
@@ -287,7 +296,7 @@ pub(super) fn roll_weight(settings: &FishingSettings, species: &Species, depth: 
         };
     let trophy = f64::from(species.trophy_grams);
     let large = f64::from(species.large_grams);
-    let small = f64::from(species.small_grams).max(min_grams);
+    let small = f64::from(species.small_grams);
 
     if roll < trophy_share {
         (lerp(trophy, trophy * settings.top_weight_factor, point * point), TROPHY_CLASS)
@@ -340,8 +349,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let base = travel::current_base(&world.settings, player);
     let cast = Cast { base, location: player.location, bait, max_grams, depth, bottom, night: is_night(settings) };
     player.casts.insert(player.location, LastCast { depth, bottom, bait: bait.unwrap_or(0), at: chrono::Utc::now().timestamp() });
-    let Odds { chance, options, total, min_grams, luck } =
-        odds(world, &player.data, &cast, random::<f64>() < settings.small_fish_nibble_share);
+    let Odds { chance, options, total, min_grams, luck } = odds(world, &player.data, &cast);
 
     let mut w = AfcWriter::new();
     if options.is_empty() || random::<f64>() >= chance {
@@ -351,8 +359,14 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     }
 
     let species = pick(&options, total, random());
-    let rolled = roll_weight(settings, species, depth, min_grams, luck, random(), random());
-    let (grams, size_class) = fit_to_tackle(species, rolled, min_grams, max_grams, random());
+    let rolled = roll_weight(settings, species, depth, luck, random(), random());
+    let (grams, size_class) = fit_to_tackle(species, rolled, max_grams, random());
+    if random::<f64>() < drop_chance(min_grams, f64::from(grams)) {
+        conn.log(&format!("   -> 1120 no bite: {} {grams} g is too small for the bait", species.name));
+        w.boolean(false).single((chance * 100.0) as f32);
+        conn.send(msg::BITE, w.finish()).await?;
+        return Ok(Outcome::Answered);
+    }
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
 
     let small = f64::from(species.small_grams);
@@ -525,7 +539,6 @@ mod tests {
             mutant_species: vec![],
             bite_chance: 1.0,
             bite_behaviour: String::new(),
-            small_fish_nibble_share: 0.0,
             bait_per_catch: 1,
             full_bite_weight: 8.0,
             bait_attraction: 1.0,
@@ -584,22 +597,22 @@ mod tests {
     #[test]
     fn luck_widens_the_trophy_share() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.15, 0.0).1, LARGE_CLASS);
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 2.0, 0.15, 0.0).1, TROPHY_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 50.0, 1.0, 0.15, 0.0).1, LARGE_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 50.0, 2.0, 0.15, 0.0).1, TROPHY_CLASS);
     }
 
     #[test]
     fn rolls_land_in_their_size_class() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.05, 0.0), (5000, TROPHY_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.2, 0.0), (1000, LARGE_CLASS));
-        assert_eq!(roll_weight(&settings, &species, 50.0, 0.0, 1.0, 0.9, 0.0), (100, 0));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 1.0, 0.05, 0.0), (5000, TROPHY_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 1.0, 0.2, 0.0), (1000, LARGE_CLASS));
+        assert_eq!(roll_weight(&settings, &species, 50.0, 1.0, 0.9, 0.0), (100, 0));
     }
 
     #[test]
     fn deep_water_doubles_trophies() {
         let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 400.0, 0.0, 1.0, 0.15, 0.0).1, TROPHY_CLASS);
+        assert_eq!(roll_weight(&settings, &species, 400.0, 1.0, 0.15, 0.0).1, TROPHY_CLASS);
     }
 
     #[test]
@@ -620,25 +633,19 @@ mod tests {
     }
 
     #[test]
-    fn a_big_bait_skips_fish_too_small_for_it() {
-        let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = |min_grams| Conditions { bait: Some(1010), min_grams, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
-        assert_eq!(candidates(&table, &settings(), 4, &conditions(1000.0)).len(), 1);
-        assert!(candidates(&table, &settings(), 4, &conditions(1001.0)).is_empty());
-    }
-
-    #[test]
-    fn a_rolled_weight_reaches_the_bait_minimum() {
-        let (settings, species) = (settings(), species());
-        assert_eq!(roll_weight(&settings, &species, 50.0, 500.0, 1.0, 0.9, 0.0), (500, 0));
+    fn a_bait_too_big_lets_the_fish_go() {
+        assert_eq!(drop_chance(0.0, 100.0), 0.0);
+        assert_eq!(drop_chance(500.0, 500.0), 0.0);
+        assert!((drop_chance(1000.0, 500.0) - 0.2).abs() < 1e-3);
+        assert_eq!(drop_chance(20000.0, 30.0), 1.0);
     }
 
     #[test]
     fn wrong_bait_gets_no_bite() {
         let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = Conditions { bait: Some(7), min_grams: 0.0, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(7), max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
         assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
-        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(1010), max_grams: f64::INFINITY, depth: 50.0, bottom: 100.0, night: false };
         assert_eq!(candidates(&table, &settings(), 4, &conditions).len(), 1);
     }
 
@@ -674,15 +681,15 @@ mod tests {
     #[test]
     fn a_fish_too_heavy_for_the_tackle_comes_up_lighter() {
         let species = species();
-        assert_eq!(fit_to_tackle(&species, (800, 0), 0.0, 1500.0, 0.5), (800, 0));
-        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 0.0, 1500.0, 1.0), (1500, LARGE_CLASS));
-        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 0.0, 1500.0, 0.0), (100, 0));
+        assert_eq!(fit_to_tackle(&species, (800, 0), 1500.0, 0.5), (800, 0));
+        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 1500.0, 1.0), (1500, LARGE_CLASS));
+        assert_eq!(fit_to_tackle(&species, (4000, LARGE_CLASS), 1500.0, 0.0), (100, 0));
     }
 
     #[test]
     fn species_too_heavy_for_the_tackle_do_not_bite() {
         let table = FishTable::for_tests(vec![species()], 4);
-        let conditions = Conditions { bait: Some(1010), min_grams: 0.0, max_grams: 50.0, depth: 50.0, bottom: 100.0, night: false };
+        let conditions = Conditions { bait: Some(1010), max_grams: 50.0, depth: 50.0, bottom: 100.0, night: false };
         assert!(candidates(&table, &settings(), 4, &conditions).is_empty());
     }
 
