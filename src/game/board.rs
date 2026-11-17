@@ -519,24 +519,28 @@ fn counts_for(task: &BoardTask, fish: &CaughtFish) -> i32 {
     }
 }
 
-/// A fish put in the keepnet for tasks. Every task of the base it fits
-/// counts it; all but the daily ones take it out of the keepnet.
+/// Counts the fish for one task of the base it fits, the one taken first (no
+/// guide says how the original chose; a fish handed in is gone, so it goes to
+/// one task only). Returns that task as it is now.
+fn count_fish(tasks: &mut [BoardTask], base: i32, fish: &CaughtFish) -> Option<BoardTask> {
+    let task = tasks
+        .iter_mut()
+        .filter(|task| task.category >= FIRST_BOARD_CATEGORY && task.base == base && task.progress < task.target)
+        .find(|task| counts_for(task, fish) > 0)?;
+    task.progress = (task.progress + counts_for(task, fish)).min(task.target);
+    Some(task.clone())
+}
+
+/// A fish put in the keepnet for tasks goes to one task of the base it fits;
+/// all but the daily ones take it out of the keepnet.
 pub async fn fish_kept(conn: &Conn, player: &mut Player, fish: &CaughtFish) -> Result<()> {
     drop_expired(conn, player).await?;
     let base = travel::current_base(&conn.world.settings, player);
-    let mut changed = Vec::new();
-    let mut take_fish = false;
-    for task in player.data.board_tasks.iter_mut().filter(|task| task.category >= FIRST_BOARD_CATEGORY && task.base == base && task.progress < task.target) {
-        let added = counts_for(task, fish);
-        if added > 0 {
-            task.progress = (task.progress + added).min(task.target);
-            take_fish |= task.category != DAILY;
-            changed.push(task.clone());
-        }
-    }
-    if changed.is_empty() {
+    let Some(task) = count_fish(&mut player.data.board_tasks, base, fish) else {
         return Ok(());
-    }
+    };
+    let take_fish = task.category != DAILY;
+    let changed = vec![task];
     if take_fish {
         player.data.fish.retain(|kept| kept.id != fish.id);
         let mut w = AfcWriter::new();
@@ -638,6 +642,16 @@ mod tests {
         assert_eq!(counts_for(&task(TROPHIES), &fish(900, 2, 1010)), 1);
         assert_eq!(counts_for(&BoardTask { bait: 1012, ..task(WEIGHT_ON_BAIT) }, &fish(300, 0, 1010)), 0);
         assert_eq!(counts_for(&BoardTask { bait: 1010, ..task(WEIGHT_ON_BAIT) }, &fish(300, 0, 1010)), 300);
+    }
+
+    #[test]
+    fn a_fish_goes_to_one_task_only() {
+        let at = |id, base, progress| BoardTask { id, base, category: INCOME, progress, ..task(COUNT) };
+        let mut tasks = vec![at(1, 2, 0), at(2, 1, 5), at(3, 1, 0), at(4, 1, 0)];
+        let counted = count_fish(&mut tasks, 1, &fish(300, 0, 1010)).map(|task| task.id);
+        assert_eq!(counted, Some(3));
+        assert_eq!(tasks.iter().map(|task| task.progress).collect::<Vec<_>>(), vec![0, 5, 1, 0]);
+        assert!(count_fish(&mut tasks, 1, &fish(300, 0, 1010)).is_some_and(|task| task.id == 3 && task.progress == 2));
     }
 
     #[test]
