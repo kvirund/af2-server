@@ -132,19 +132,19 @@ async fn handle_operation(
         }
     };
 
-    if outcome == Outcome::Unanswered && message.id != messages::HEARTBEAT {
+    // A report we already know needs no reply is not a gap, so it neither lands
+    // in the log nor raises the overlay. Leaving it in drowned the real gaps.
+    if outcome == Outcome::Unanswered && !messages::REPORTS_ONLY.contains(&message.id) {
         record_unanswered(session, &message, gaps);
-        if !messages::REPORTS_ONLY.contains(&message.id) {
-            session.conn.clear_overlay().await?;
-            session.conn.log(&format!("   -> 1310 overlay cleared after unanswered msg {}", message.id));
-        }
+        session.conn.clear_overlay().await?;
+        session.conn.log(&format!("   -> 1310 overlay cleared after unanswered msg {}", message.id));
     }
     Ok(())
 }
 
-/// Every client message left without an answer is a potential gap in the
-/// protocol, so each gets a greppable line. A first sighting is flagged NEW and
-/// shows the whole payload.
+/// Every client message left without an answer, bar the reports listed as
+/// needing none, is a gap in the protocol, so each gets a greppable line. A
+/// first sighting is flagged NEW and shows the whole payload.
 fn record_unanswered(session: &Session, message: &AfcMessage, gaps: &mut BTreeMap<i32, u32>) {
     let count = gaps.entry(message.id).or_insert(0);
     *count += 1;

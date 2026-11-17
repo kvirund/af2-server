@@ -742,11 +742,13 @@ mod tests {
     #[test]
     fn no_task_asks_for_a_bait_too_big_for_the_fish() {
         let sized = |id, size: &str| crate::config::CatalogItem { xml: format!("<basePar>100/{size}/0</basePar>"), ..bait(id, 10) };
-        let catalog = Catalog::new(vec![sized(1018, "0"), sized(1012, "1")]);
-        let bleak = Species { small_grams: 31, large_grams: 37, trophy_grams: 145, ..species(112, false, vec![1012, 1018]) };
-        let roach = Species { small_grams: 59, large_grams: 427, trophy_grams: 1501, ..species(77, false, vec![1012, 1018]) };
-        assert_eq!(baits_for(&catalog, &bleak, None), vec![1018]);
-        assert_eq!(baits_for(&catalog, &roach, None), vec![1012, 1018]);
+        // Мотыль, хлеб and лягушка: only the frog is too much for a small fish.
+        let catalog = Catalog::new(vec![sized(1018, "0"), sized(1012, "1"), sized(1412, "3")]);
+        let baits = vec![1012, 1018, 1412];
+        let bleak = Species { small_grams: 31, large_grams: 37, trophy_grams: 145, ..species(112, false, baits.clone()) };
+        let roach = Species { small_grams: 59, large_grams: 427, trophy_grams: 1501, ..species(77, false, baits) };
+        assert_eq!(baits_for(&catalog, &bleak, None), vec![1012, 1018]);
+        assert_eq!(baits_for(&catalog, &roach, None), vec![1012, 1018, 1412]);
     }
 
     /// The same over the real tables: fish come from `config/fish.json`, built
@@ -763,8 +765,9 @@ mod tests {
             .collect();
         if !missing.is_empty() {
             eprintln!(
-                "warning: data/{} missing, so the real tables went unchecked. They are read out of                  your own copy of the game; extract them with:
-                     cargo run --release --bin af2-launcher -- --server local --no-launch",
+                "warning: data/{} missing, so the real tables went unchecked. \
+                 They are read out of your own copy of the game; extract them with:\n    \
+                 cargo run --release --bin af2-launcher -- --extract",
                 missing.join(", data/")
             );
             return;

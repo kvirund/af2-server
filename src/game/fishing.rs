@@ -28,9 +28,16 @@ pub const LARGE_CLASS: i32 = 1;
 /// Rod, two three-double vectors.
 const DEPTH_OFFSET: usize = 4 + 24 + 24;
 /// Smallest fish, in grams, for each bait size class: the second number of the
-/// item's `basePar`. The client dips the float once for anything lighter, with
-/// no bite to set the hook on. Other classes have no minimum.
-const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
+/// item's `basePar`. Class 0 is мотыль and муха, 1 хлеб and опарыш, 2 жук and
+/// живец, 3 выползок and лягушка — the насадка's own size, nothing else.
+///
+/// The guides state no floor for it. The one size rule they do state is about
+/// the hook, and it runs the other way: a big fish on a small hook takes longer
+/// to land and so has longer to come off. What the game's own tables show is
+/// that the lightest fish listed on a class 3 bait usually runs 210 g, while
+/// every other class is listed for fish of 3 g, so only class 3 gets a floor,
+/// and it sits just under that 210 g. A class the tables never use gets none.
+const BAIT_MIN_GRAMS: [f64; 4] = [0.0, 0.0, 0.0, 200.0];
 /// How often a fish lighter than the bait's size comes off, against how many
 /// times lighter it is: one half the bait's size comes off a fifth of the time.
 /// Invented: the real rule is recorded nowhere.
@@ -626,7 +633,10 @@ mod tests {
 
     #[test]
     fn bait_size_class_comes_from_the_item() {
-        assert_eq!(bait_min_grams("<base><basePar>150/1/0</basePar></base>"), 500.0);
+        assert_eq!(bait_min_grams("<base><basePar>150/3/0</basePar></base>"), 200.0);
+        // Хлеб and жук hold no fish back: only лягушка and its class do.
+        assert_eq!(bait_min_grams("<base><basePar>100/1/0</basePar></base>"), 0.0);
+        assert_eq!(bait_min_grams("<base><basePar>120/2/0</basePar></base>"), 0.0);
         assert_eq!(bait_min_grams("<base><basePar>110/0/0</basePar></base>"), 0.0);
         assert_eq!(bait_min_grams("<base><basePar>105/1010/0</basePar></base>"), 0.0);
         assert_eq!(bait_min_grams("<base></base>"), 0.0);
