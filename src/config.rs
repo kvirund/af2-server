@@ -1068,6 +1068,25 @@ pub struct SkillSettings {
     /// points to the critical chance.
     #[serde(default)]
     pub fish_cutting_station: i32,
+    /// Course item to the skill it teaches, for courses whose `basePar` in the
+    /// client names another skill.
+    #[serde(default)]
+    pub course_skills: BTreeMap<i32, i32>,
+}
+
+impl SkillSettings {
+    /// Writes the right skill into a course's `basePar`, so the server and the
+    /// client (which gets the description with the item) both read it.
+    fn fix_course(&self, item: &mut CatalogItem) {
+        let Some(skill) = self.course_skills.get(&item.id) else {
+            return;
+        };
+        let Some((before, rest)) = item.xml.split_once("<basePar>") else {
+            return;
+        };
+        let end = rest.find(['/', '<']).unwrap_or(rest.len());
+        item.xml = format!("{before}<basePar>{skill}{}", &rest[end..]);
+    }
 }
 
 /// One skill of the game's tree.
@@ -1289,7 +1308,10 @@ pub fn load(config_dir: &Path, root: &Path) -> Result<GameData> {
     })?;
     let mut items: Vec<CatalogItem> =
         serde_json::from_str(&text).with_context(|| items_path.display().to_string())?;
-    items.iter_mut().for_each(|item| settings.shop.adjust(item));
+    for item in &mut items {
+        settings.shop.adjust(item);
+        settings.skills.fix_course(item);
+    }
 
     let catalog = Catalog::new(items);
 
@@ -1371,6 +1393,31 @@ mod tests {
         assert_eq!(prices(item(4, 300)), (300, 0));
         assert_eq!(prices(item(5, 0)), (1000, 0));
         assert_eq!(prices(item(7, 0)), (0, 0));
+    }
+
+    #[test]
+    fn a_course_is_given_its_own_skill() {
+        let skills = SkillSettings { course_skills: [(1540, 410)].into(), ..Default::default() };
+        let course = |id| CatalogItem {
+            id,
+            kind: 34,
+            cost: 50000,
+            durability: 1.0,
+            stacks: false,
+            shop_count: 1,
+            max_count: 10,
+            premium_cost: 0,
+            xml: "<wtype>34</wtype><basePar>192/0/0</basePar><weight>100</weight>".into(),
+            refine: String::new(),
+            name: String::new(),
+            cost_item: [1179, 50],
+        };
+        let mut jigs = course(1540);
+        skills.fix_course(&mut jigs);
+        assert_eq!(jigs.xml, "<wtype>34</wtype><basePar>410/0/0</basePar><weight>100</weight>");
+        let mut other = course(1274);
+        skills.fix_course(&mut other);
+        assert_eq!(other.xml, course(1274).xml);
     }
 
     #[test]

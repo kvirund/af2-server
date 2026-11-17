@@ -284,6 +284,7 @@ mod tests {
                 lure_skills: Default::default(),
                 lure_bite_percent: 0.0,
                 fish_cutting_station: 0,
+                course_skills: Default::default(),
             },
         }
     }
