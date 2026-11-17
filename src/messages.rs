@@ -62,6 +62,8 @@ pub const REPUTATION_LEVEL: i32 = 306;
 pub const REPUTATION_GAINED: i32 = 307;
 pub const CHARACTER_CARD: i32 = 32;
 pub const RECORDS: i32 = 40;
+/// The rating board on the bases, both ways.
+pub const RATING: i32 = 1440;
 pub const TITLES: i32 = 101;
 /// S→C: the character died. Client: int 0, back to life.
 pub const DEATH: i32 = 905;

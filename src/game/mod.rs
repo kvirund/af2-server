@@ -24,6 +24,7 @@ mod packages;
 mod panels;
 mod perks;
 mod quests;
+mod rating;
 mod refining;
 mod reputation;
 mod scripts;
@@ -282,6 +283,7 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::TITLES if matches!(message.reader().int32(), Ok(0)) => titles::tab(session).await,
         msg::TITLE_CHOOSE => titles::choose(session, message).await,
         msg::DEATH => death::respawn(session).await,
+        msg::RATING => rating::board(session, message).await,
         id @ (msg::TITLES | msg::RECORDS | msg::ACHIEVEMENTS) => {
             panels::empty_tab(session, message, id).await
         }

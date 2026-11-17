@@ -129,7 +129,7 @@ fn expand(settings: &BagSettings, character: &mut CharacterData, bag: i32, metho
     let spent = match method {
         PAY_TOKENS => inventory::take_carried(character, item, tokens)?,
         PAY_PREMIUM if character.premium >= premium => {
-            character.premium -= premium;
+            character::spend_premium(character, premium);
             Default::default()
         }
         _ => return None,

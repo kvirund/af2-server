@@ -12,7 +12,7 @@ use rand::random;
 
 use std::collections::BTreeMap;
 
-use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, chat, deeds, effects, quests, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
+use super::{Bite, LastCast, Outcome, Session, active, board, cards, character, chat, deeds, effects, quests, rating, tournaments, keepnet, inventory, loot, reputation, travel, vip, vitals, perks};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{FishTable, FishingSettings, ProgressionSettings, Settings, Species, TraitSettings};
 use crate::storage::CharacterData;
@@ -448,6 +448,7 @@ pub async fn landed(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let catches = player.data.catches.entry(fish.species).or_default();
     catches.count += 1;
     catches.grams += i64::from(fish.grams);
+    rating::landed(&mut player.data, &fish);
     let grams = fish.grams;
     let rod_kind = reputation::rod_kind(&conn.world.catalog, &player.data.items, bite.bait_item);
     if let Some(kind) = rod_kind {

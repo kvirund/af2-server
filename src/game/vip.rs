@@ -71,7 +71,7 @@ pub async fn grant(conn: &Conn, player: &mut Player, days: i64, premium: i64) ->
     if days <= 0 || player.data.premium < premium {
         return Ok(false);
     }
-    player.data.premium -= premium;
+    character::spend_premium(&mut player.data, premium);
     player.data.vip_until = extended(player.data.vip_until, now_seconds(), days);
     conn.save(player).await?;
     character::send_money(conn, player, 0).await?;

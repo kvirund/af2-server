@@ -762,7 +762,7 @@ pub async fn buy(
     };
     let changed = place(conn, player, item, purchase).await?;
     player.data.money -= item.cost * i64::from(count);
-    player.data.premium -= item.premium_cost * i64::from(count);
+    character::spend_premium(&mut player.data, item.premium_cost * i64::from(count));
     conn.save(player).await?;
     Ok(Ok(changed))
 }

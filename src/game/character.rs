@@ -8,6 +8,18 @@ use crate::afc::{AfcMessage, AfcReader, AfcWriter};
 use crate::messages as msg;
 use crate::storage::{CharacterData, ItemEntry};
 
+/// Ergs spent in all, for the patrons' rating.
+pub const ERGS_SPENT: &str = "ergs_spent";
+
+/// Takes ergs and remembers them for the patrons' rating.
+pub fn spend_premium(character: &mut CharacterData, amount: i64) {
+    character.premium -= amount;
+    if amount > 0 {
+        let spent = character.quest_values.entry(ERGS_SPENT.into()).or_insert(0);
+        *spent = spent.saturating_add(i32::try_from(amount).unwrap_or(i32::MAX));
+    }
+}
+
 /// The client only lets a player enter the world when the login reply carries a
 /// non-empty token, so a client without a Steam id still needs one.
 const ANONYMOUS_KEY: &str = "local";
