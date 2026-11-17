@@ -206,8 +206,9 @@ pub async fn start(session: &mut Session, message: &AfcMessage) -> Result<Outcom
     reply(conn, msg::HARVEST_START, &format!("ok={}", info.seconds)).await
 }
 
-/// Pieces of each item one gathering gives.
-fn roll(info: &GatherResource, mut random: impl FnMut() -> f64) -> BTreeMap<i32, i32> {
+/// Pieces of each item one gathering gives. `base_card`: the card of this
+/// base, for drops that name it.
+fn roll(info: &GatherResource, base_card: Option<i32>, mut random: impl FnMut() -> f64) -> BTreeMap<i32, i32> {
     let mut found = BTreeMap::new();
     for _ in 0..info.rolls.max(1) {
         let Some(drop) = pick(info.drops.iter().map(|drop| (drop, drop.weight)), random()) else {
@@ -215,7 +216,10 @@ fn roll(info: &GatherResource, mut random: impl FnMut() -> f64) -> BTreeMap<i32,
         };
         let (low, high) = (drop.min.max(1), drop.max.max(drop.min.max(1)));
         let count = low + ((high - low + 1) as f64 * random()).floor().min((high - low) as f64) as i32;
-        *found.entry(drop.item).or_insert(0) += count;
+        let item = if drop.base_card { base_card } else { Some(drop.item) };
+        if let Some(item) = item {
+            *found.entry(item).or_insert(0) += count;
+        }
     }
     found
 }
@@ -259,7 +263,7 @@ pub async fn finish(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let mut changed = Vec::new();
     let mut gained = AfcWriter::new();
     let mut names = Vec::new();
-    for (template, count) in roll(info, random) {
+    for (template, count) in roll(info, settings.loot.base_cards.get(&base).copied(), random) {
         let Some(item) = world.catalog.get(template) else {
             conn.log(&format!("   gathered item {template} is not in the catalog"));
             continue;
@@ -294,7 +298,7 @@ mod tests {
     use crate::config::{GatherBase, GatherDrop};
 
     fn drop(item: i32, weight: f64, min: i32, max: i32) -> GatherDrop {
-        GatherDrop { item, weight, min, max }
+        GatherDrop { item, base_card: false, weight, min, max }
     }
 
     fn settings() -> GatheringSettings {
@@ -365,7 +369,22 @@ mod tests {
             drops: vec![drop(1, 1.0, 2, 4), drop(2, 1.0, 1, 1)],
         };
         let mut rolls = [0.1, 0.0, 0.1, 0.999, 0.9, 0.5].into_iter();
-        let found = roll(&info, || rolls.next().unwrap());
+        let found = roll(&info, None, || rolls.next().unwrap());
         assert_eq!(found, BTreeMap::from([(1, 6), (2, 1)]));
+    }
+
+    #[test]
+    fn junk_holds_the_card_of_its_base() {
+        let info = GatherResource {
+            name: String::new(),
+            work_points: 1.0,
+            seconds: 1.0,
+            skill: 0,
+            skill_level: 0,
+            rolls: 1,
+            drops: vec![GatherDrop { item: 0, base_card: true, weight: 1.0, min: 1, max: 1 }],
+        };
+        assert_eq!(roll(&info, Some(1312), || 0.5), BTreeMap::from([(1312, 1)]));
+        assert!(roll(&info, None, || 0.5).is_empty());
     }
 }

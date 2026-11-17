@@ -261,8 +261,14 @@ pub struct GatherResource {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GatherDrop {
+    #[serde(default)]
     pub item: i32,
+    /// Instead of `item`: the card of the base where it is gathered
+    /// (`loot.baseCards`); nothing on a base without one.
+    #[serde(default)]
+    pub base_card: bool,
     pub weight: f64,
     pub min: i32,
     pub max: i32,
