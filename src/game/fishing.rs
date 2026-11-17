@@ -354,7 +354,7 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let base = travel::current_base(&world.settings, player);
     let cast = Cast { base, location: player.location, bait, max_grams, depth, bottom, night: is_night(settings) };
     player.casts.insert(player.location, LastCast { depth, bottom, bait: bait.unwrap_or(0), at: chrono::Utc::now().timestamp() });
-    let Odds { chance, options, total, min_grams, luck } = odds(world, &player.data, &cast);
+    let Odds { chance, options, total, luck, .. } = odds(world, &player.data, &cast);
 
     let mut w = AfcWriter::new();
     if options.is_empty() || random::<f64>() >= chance {
@@ -366,12 +366,10 @@ pub async fn bite(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     let species = pick(&options, total, random());
     let rolled = roll_weight(settings, species, depth, luck, random(), random());
     let (grams, size_class) = fit_to_tackle(species, rolled, max_grams, random());
-    if random::<f64>() < drop_chance(min_grams, f64::from(grams)) {
-        conn.log(&format!("   -> 1120 no bite: {} {grams} g is too small for the bait", species.name));
-        w.boolean(false).single((chance * 100.0) as f32);
-        conn.send(msg::BITE, w.finish()).await?;
-        return Ok(Outcome::Answered);
-    }
+    // A fish too small for the bait is the client's business: it rolls the same
+    // formula on the bite we send here, dips the float and keeps the signal
+    // quiet. Rolling it here too halved the chances of everything in between —
+    // a 142 g fish reached the signal a quarter of the time instead of half.
     player.bites_by_rod.insert(rod, Bite { species: species.id, grams, size_class, bait: bait.unwrap_or(UNKNOWN_BAIT), bait_item: bait_id });
 
     let small = f64::from(species.small_grams);
