@@ -17,7 +17,7 @@ pub mod fishing;
 mod fridge;
 mod generator;
 mod gathering;
-mod inventory;
+pub mod inventory;
 mod loot;
 mod mail;
 pub mod keepnet;

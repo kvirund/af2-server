@@ -737,7 +737,15 @@ pub fn plan_purchase(
     {
         return Err(BuyError::NoMoney);
     }
-    plan_pieces(settings, character, item, count.saturating_mul(item.shop_count.max(1)))
+    plan_pieces(settings, character, item, count.saturating_mul(pack_of(item)))
+}
+
+/// How many pieces one purchase of an item gives. A thing that wears is sold
+/// one at a time — each piece carries its own durability and its own cell, and
+/// a lot of five would want five free cells for one buy; everything else comes
+/// in the lot the client's `shopCount` names, fifty мотыль at a time.
+pub fn pack_of(item: &CatalogItem) -> i32 {
+    if item.wears { 1 } else { item.shop_count.max(1) }
 }
 
 /// Where this many pieces of an item would go: onto stacks first, then free cells.
@@ -878,6 +886,18 @@ mod tests {
 
     fn catalog_item(stacks: bool, cost: i64) -> CatalogItem {
         CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0], ..Default::default() }
+    }
+
+    #[test]
+    fn a_wearing_thing_is_sold_one_at_a_time() {
+        let mut bread = catalog_item(true, 1);
+        bread.shop_count = 50;
+        assert_eq!(pack_of(&bread), 50);
+        // Червь имитация: five in the shop's line, but each has its own wear
+        // and its own cell, so a purchase is one of them.
+        let mut imitation = catalog_item(true, 310);
+        (imitation.shop_count, imitation.wears) = (5, true);
+        assert_eq!(pack_of(&imitation), 1);
     }
 
     #[test]

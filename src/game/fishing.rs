@@ -42,6 +42,8 @@ const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
 const DROP_PERCENT: f64 = 20.0;
 /// Cells of a rod's bag holding the rod, reel and line.
 const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
+/// The rod's own cell, the first of them.
+const ROD_CELL: i32 = TACKLE_CELLS[0];
 pub const NIGHT_START_HOUR: f64 = 21.5;
 pub const NIGHT_END_HOUR: f64 = 4.5;
 /// The client asks for a bite this often while the bait is in the water.
@@ -191,12 +193,16 @@ fn tackle_limit(test_of: &dyn Fn(&ItemEntry) -> Option<f64>, items: &[ItemEntry]
 /// How often the chat says again that match tackle needs «Матч».
 const MATCH_WARNING_SECONDS: u64 = 60;
 
-/// Whether the rod the bait is on has a piece of match tackle.
+/// Whether the rod the bait is on is a match rod. The skill «Матч» says of
+/// itself that it «позволяет использовать матчевые удочки» — rods, so only the
+/// rod cell is looked at. Catching nothing because of a match reel on an
+/// ordinary rod was our own reading, and a wider one than the skill claims.
 fn needs_match(settings: &FishingSettings, items: &[ItemEntry], bait_item: i64) -> bool {
     let Some(bag) = items.iter().find(|item| item.id == bait_item).map(|item| item.bag) else {
         return false;
     };
-    settings.match_perk > 0 && items.iter().any(|item| item.bag == bag && settings.match_items.contains(&item.template))
+    let rod = items.iter().find(|item| item.bag == bag && item.cell == ROD_CELL);
+    settings.match_perk > 0 && rod.is_some_and(|rod| settings.match_items.contains(&rod.template))
 }
 
 /// A piece's test, from its description as the client sees it.
@@ -668,6 +674,26 @@ mod tests {
         let options = vec![(&a, 1.0), (&b, 3.0)];
         assert_eq!(pick(&options, 4.0, 0.1).id, 1);
         assert_eq!(pick(&options, 4.0, 0.9).id, 2);
+    }
+
+    #[test]
+    fn only_a_match_rod_asks_for_the_skill() {
+        let mut settings = settings();
+        settings.match_perk = 195;
+        settings.match_items = vec![1376, 1384];
+        let piece = |id: i64, cell: i32, template: i32| ItemEntry { id, bag: 100, cell, count: 1, durability: 1.0, template, param: 0, parts: [0; 4] };
+        let bait = piece(50, 20, 1089);
+        // Бамбук-4 with a match reel: the skill is about rods, not reels.
+        let ordinary = vec![piece(1, 1, 1061), piece(2, 2, 1384), bait.clone()];
+        assert!(!needs_match(&settings, &ordinary, 50));
+        // Матч-Премиум itself does ask for it.
+        let match_rod = vec![piece(1, 1, 1376), piece(2, 2, 1384), bait.clone()];
+        assert!(needs_match(&settings, &match_rod, 50));
+        // A bait on no rod at all asks for nothing.
+        assert!(!needs_match(&settings, &match_rod, 99));
+        // The rule is off when no perk is named.
+        settings.match_perk = 0;
+        assert!(!needs_match(&settings, &match_rod, 50));
     }
 
     #[test]

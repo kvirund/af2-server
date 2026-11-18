@@ -449,7 +449,7 @@ fn reference(world: &World) -> Reference {
             name: item_name(world, item.id),
             kind: item.kind,
             price: item.cost as f64 / 100.0,
-            pack: item.shop_count.max(1),
+            pack: crate::game::inventory::pack_of(item),
             level: advisor::level_of(item),
             sold_at: bases.iter().map(|base| base.id).filter(|base| advisor::buyable(world, *base, i32::MAX, item.id)).collect(),
         })
