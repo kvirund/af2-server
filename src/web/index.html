@@ -137,6 +137,9 @@ main { min-width: 0; padding: 24px 32px 48px; max-width: 1240px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: var(--sunken); color: var(--ink-2); white-space: nowrap; text-decoration: none; border: 1px solid transparent; }
 a.chip:hover { border-color: var(--line-2); color: var(--ink); }
 .chip.have { background: var(--accent-soft); color: var(--accent); }
+.chip .bait-star { margin-left: 4px; font-size: 11px; line-height: 1; letter-spacing: -1px; opacity: 0.85; cursor: help; }
+.bait-legend { margin: 6px 0 0; font-size: 12px; }
+
 .chip.shop { background: var(--warn-soft); color: var(--warn); }
 .chip.bad { background: var(--bad-soft); color: var(--bad); }
 .chip .i { width: 13px; height: 13px; }
@@ -414,25 +417,33 @@ function catchBar(row, color, top = 4) {
     + (rest > 0.005 ? `<span class="muted"><i style="background:var(--other)"></i>остальные ${pct(rest)}</span>` : '');
   return `<div class="bar">${segments}</div><div class="legend">${legend}</div>`;
 }
-function baitChip(id, base) {
+function baitChip(id, base, mark = '') {
   const bait = baitById.get(id), owned = advice?.owned?.[id] || 0;
   const name = esc(baitName(id));
-  if (owned > 0) return `<a class="chip have" href="#/bait/${id}" title="Есть у персонажа">${icon('bag')}${name} · ${n0.format(owned)} шт.</a>`;
+  if (owned > 0) return `<a class="chip have" href="#/bait/${id}" title="Есть у персонажа">${icon('bag')}${name} · ${n0.format(owned)} шт.${mark}</a>`;
   if (bait && bait.soldAt.includes(base) && bait.price > 0 && bait.level <= (advice?.character.level ?? 99)) {
-    return `<a class="chip shop" href="#/bait/${id}" title="Продаётся на этой базе">${icon('shop')}${name} · ${money(bait.price)}${bait.pack > 1 ? ` за ${bait.pack}` : ''}</a>`;
+    return `<a class="chip shop" href="#/bait/${id}" title="Продаётся на этой базе">${icon('shop')}${name} · ${money(bait.price)}${bait.pack > 1 ? ` за ${bait.pack}` : ''}${mark}</a>`;
   }
-  return `<a class="chip" href="#/bait/${id}" title="Нет у персонажа и не продаётся здесь">${name}</a>`;
+  return `<a class="chip" href="#/bait/${id}" title="Нет у персонажа и не продаётся здесь">${name}${mark}</a>`;
 }
+// Звёздочка живёт внутри карточки наживки: отдельной меткой рядом было не
+// понять, к какой из них она относится, когда строка переносится.
 const BAIT_CLASS = {
-  1: { tag: 'от крупной', why: 'обычная срывается с неё чаще, чем остаётся' },
-  2: { tag: 'только трофей', why: 'и обычная, и крупная срываются с неё чаще, чем остаются' },
+  1: { stars: '★', holds: 'крупная и трофейная', why: 'обычная срывается с неё чаще, чем остаётся' },
+  2: { stars: '★★', holds: 'только трофейная', why: 'и обычная, и крупная срываются с неё чаще, чем остаются' },
 };
-function baitClassTag(fish, bait) {
+function baitClassMark(fish, bait) {
   const level = fish.baitFromClass?.[bait];
   if (!level) return '';
-  const { tag, why } = BAIT_CLASS[level];
-  const tip = `Насадка велика для мелкой рыбы: ${why}. Держится ${level === 2 ? 'только трофейная' : 'крупная и трофейная'} ${fish.name.toLowerCase()}.`;
-  return `<span class="time-tag" title="${esc(tip)}">${tag}</span>`;
+  const { stars, holds, why } = BAIT_CLASS[level];
+  const tip = `Насадка велика для мелкой рыбы: ${why}. Держится ${holds} ${fish.name.toLowerCase()}.`;
+  return `<sup class="bait-star" title="${esc(tip)}">${stars}</sup>`;
+}
+function baitClassLegend(fish) {
+  const levels = new Set(fish.baits.map((bait) => fish.baitFromClass?.[bait]).filter(Boolean));
+  if (!levels.size) return '';
+  const parts = [...levels].sort().map((level) => `${BAIT_CLASS[level].stars} — держится ${BAIT_CLASS[level].holds}`);
+  return `<p class="muted bait-legend">${esc(parts.join(', '))}</p>`;
 }
 const timeTag = (night) => night ? `<span class="time-tag is-night">${icon('moon')}ночью</span>` : `<span class="time-tag is-day">${icon('sun')}днём</span>`;
 function depthText(row) {
@@ -522,7 +533,7 @@ function optionRow(row, i, color, lead, options = {}) {
   return `<article class="card opt ${i === 0 ? 'best' : ''}" data-row="${i}">
     <div class="rank">${i + 1}</div>
     <div><div class="opt-title">${place}</div>
-      <div class="opt-meta">${baitChip(row.bait, row.base)}<span>${depthText(row)}</span>${state.time === 'both' || options.alwaysTime ? timeTag(row.night) : ''}${warnings.join('')}</div></div>
+      <div class="opt-meta">${baitChip(row.bait, row.base, options.fish ? baitClassMark(options.fish, row.bait) : '')}<span>${depthText(row)}</span>${state.time === 'both' || options.alwaysTime ? timeTag(row.night) : ''}${warnings.join('')}</div></div>
     <div class="stats">${stats.map(([id, value, label]) => `<div class="stat ${id === lead ? 'lead' : ''}"><b>${value}</b><span>${label}</span></div>`).join('')}</div>
     <button class="more" data-toggle="${i}" aria-label="Подробнее">${icon('down')}</button>
     <div class="catch">${catchBar(row, color)}</div>
@@ -712,10 +723,10 @@ async function viewFish(box, id) {
       </div>
       <div class="card where"><h3>Где живёт</h3>
         ${[...byBase.entries()].map(([base, names]) => `<div class="where-base"><b>${esc(baseName(base))}</b><span class="muted">${names.map(esc).join(', ')}</span></div>`).join('') || '<span class="muted">нигде</span>'}
-        <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base) + baitClassTag(fish, bait)).join('') : '<span class="chip have">любую наживку</span>'}</div></div>
+        <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base, baitClassMark(fish, bait))).join('') : '<span class="chip have">любую наживку</span>'}</div>${baitClassLegend(fish)}</div>
     </div>
     <div class="section-title"><h2>Где и на что ловить</h2><span>${best.length ? `${Math.min(best.length, 25)} из ${best.length}, по улову этой рыбы в час` : ''}</span></div>
-    ${best.length ? `<div class="list">${best.slice(0, 25).map((row, i) => optionRow(row, i, color, 'target', { species: id, showBase: true })).join('')}</div>`
+    ${best.length ? `<div class="list">${best.slice(0, 25).map((row, i) => optionRow(row, i, color, 'target', { species: id, showBase: true, fish })).join('')}</div>`
       : empty('Не найдено', state.scope === 'mine' ? 'Твоими наживками её здесь не поймать — попробуй «Мои и в магазине» или «Все».' : state.base === 'all' ? 'Под выбранные условия она не клюёт.' : 'На этой базе её нет или она не клюёт в это время — попробуй «Все базы» или «Сутки».')}
     ${methodNote()}`;
 }
