@@ -155,9 +155,14 @@ pub async fn walk_on(session: &mut Session, message: &AfcMessage) -> Result<Outc
 
 /// The base the character is at; a new session starts on the starting base.
 pub(super) fn current_base(settings: &Settings, player: &Player) -> i32 {
-    base_of(&settings.bases, player.location)
-        .or((player.base != 0).then_some(player.base))
-        .unwrap_or(settings.character.start_base)
+    base_at(&settings.bases, settings.character.start_base, player.base, player.location)
+}
+
+/// The base a character is at: the one their location belongs to, else the one
+/// they last went to, else where everyone starts. On a base the location is 0
+/// and names no base, so only the character knows which one it is.
+fn base_at(bases: &BTreeMap<i32, BaseSettings>, start_base: i32, base: i32, location: i32) -> i32 {
+    base_of(bases, location).or((base != 0).then_some(base)).unwrap_or(start_base)
 }
 
 /// Which base a fishing location belongs to.
@@ -175,7 +180,10 @@ pub async fn return_to_base(session: &mut Session) -> Result<Outcome> {
     let conn = &session.conn;
     let settings = &conn.world.settings;
 
-    let base = base_of(&settings.bases, player.location).unwrap_or(settings.character.start_base);
+    // Standing on a base already, the location is 0 and names no base, so the
+    // base the character is at has to come from the character. Reaching for the
+    // starting base here sent everyone to Убежище from every other base.
+    let base = current_base(settings, player);
     player.location = BASE_LOCATION;
     player.base = base;
     player.shown_points = None;
@@ -229,5 +237,17 @@ mod tests {
         assert_eq!(base_of(&bases, 21), Some(2));
         assert_eq!(base_of(&bases, BASE_LOCATION), None);
         assert_eq!(base_of(&bases, 99), None);
+    }
+
+    #[test]
+    fn standing_on_a_base_the_character_says_which_one() {
+        let bases = BTreeMap::from([(1, base(vec![0, 1, 2])), (6, base(vec![0, 61, 63]))]);
+        // On the water the location names the base, whatever the character says.
+        assert_eq!(base_at(&bases, 1, 1, 63), 6);
+        // On a base the location is 0, and only the character knows which one.
+        assert_eq!(base_at(&bases, 1, 6, BASE_LOCATION), 6);
+        assert_eq!(base_at(&bases, 1, 1, BASE_LOCATION), 1);
+        // A character who has been nowhere yet starts where everyone starts.
+        assert_eq!(base_at(&bases, 1, 0, BASE_LOCATION), 1);
     }
 }
