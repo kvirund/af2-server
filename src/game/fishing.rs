@@ -252,6 +252,18 @@ pub(super) fn bait_min_grams(xml: &str) -> f64 {
     class.and_then(|class| BAIT_MIN_GRAMS.get(class).copied()).unwrap_or(0.0)
 }
 
+/// A bait the species' usual fish come off of this often or more is no use for
+/// that species: the client lets the fish go and the float barely moves.
+pub const MOST_DROPPED: f64 = 0.5;
+
+/// Whether a bait is worth naming for this species at all — on the board, and
+/// on the pages that list what a fish takes. Хлеб asks for 500 g, so уклейка at
+/// her usual 34 g comes off every time and хлеб is no bait of hers.
+pub fn bait_fits(xml: &str, species: &Species) -> bool {
+    let usual = f64::from(species.small_grams + species.large_grams) / 2.0;
+    drop_chance(bait_min_grams(xml), usual) < MOST_DROPPED
+}
+
 /// How often a fish of this weight comes off a bait of that size: the client
 /// dips the float once, and there is no bite to set the hook on.
 pub(super) fn drop_chance(min_grams: f64, grams: f64) -> f64 {

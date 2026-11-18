@@ -12,7 +12,7 @@ mod dialog;
 mod doctor;
 mod effects;
 pub mod advisor;
-mod fishing;
+pub mod fishing;
 mod fridge;
 mod generator;
 mod gathering;

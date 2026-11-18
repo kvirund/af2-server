@@ -322,7 +322,11 @@ fn reference(world: &World) -> Reference {
                 likes_depth: one.likes_depth,
                 night_factor: one.night_factor,
                 price_per_kg: [per_kg, per_kg * market.large_price_factor, per_kg * market.trophy_price_factor].map(|price| price.round() / 100.0),
-                baits: one.baits.clone(),
+                // Only the baits the fish actually stays on: the client lets
+                // anything lighter than the bait's size go, so naming such a
+                // bait here would send the player out for a fish that cannot
+                // be caught on it.
+                baits: one.baits.iter().copied().filter(|bait| world.catalog.get(*bait).is_some_and(|item| crate::game::fishing::bait_fits(&item.xml, one))).collect(),
                 locations,
             }
         })

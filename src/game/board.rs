@@ -21,7 +21,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use rand::random;
 
-use super::fishing::{LARGE_CLASS, TROPHY_CLASS, bait_min_grams, drop_chance, experience_for};
+use super::fishing::{self, LARGE_CLASS, TROPHY_CLASS, experience_for};
 use super::{Conn, Outcome, Player, Session, active, character, chat, inventory, keepnet, reputation, tournaments, travel};
 use crate::afc::{AfcMessage, AfcWriter};
 use crate::config::{BoardSettings, Catalog, FishTable, Settings, Species, UnionBoard};
@@ -154,22 +154,15 @@ fn resource_items(board: &BoardSettings, base: i32) -> Vec<i32> {
     items
 }
 
-/// A task on a bait the species' usual fish come off of this often or more is
-/// not offered (invented: the client lets fish lighter than the bait's size go).
-const MOST_DROPPED: f64 = 0.5;
-
 /// The baits of a species a union's task may name: all, or those of its kind,
 /// and none its usual fish are too small for.
 fn baits_for(catalog: &Catalog, species: &Species, union: Option<&UnionBoard>) -> Vec<i32> {
     let kind = union.map_or(0, |union| union.bait_kind);
-    let usual = f64::from(species.small_grams + species.large_grams) / 2.0;
     species
         .baits
         .iter()
         .copied()
-        .filter(|bait| {
-            catalog.get(*bait).is_some_and(|item| (kind == 0 || item.kind == kind) && drop_chance(bait_min_grams(&item.xml), usual) < MOST_DROPPED)
-        })
+        .filter(|bait| catalog.get(*bait).is_some_and(|item| (kind == 0 || item.kind == kind) && fishing::bait_fits(&item.xml, species)))
         .collect()
 }
 
@@ -777,7 +770,7 @@ mod tests {
         for species in data.fish.all() {
             for bait in baits_for(&data.catalog, species, None) {
                 let item = data.catalog.get(bait).expect("the bait is in the catalog");
-                let min_grams = bait_min_grams(&item.xml);
+                let min_grams = fishing::bait_min_grams(&item.xml);
                 let heaviest = f64::from(species.trophy_grams) * top;
                 assert!(
                     heaviest >= min_grams,
