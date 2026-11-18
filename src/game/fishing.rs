@@ -256,12 +256,20 @@ pub(super) fn bait_min_grams(xml: &str) -> f64 {
 /// that species: the client lets the fish go and the float barely moves.
 pub const MOST_DROPPED: f64 = 0.5;
 
-/// Whether a bait is worth naming for this species at all — on the board, and
-/// on the pages that list what a fish takes. Хлеб asks for 500 g, so уклейка at
-/// her usual 34 g comes off every time and хлеб is no bait of hers.
+/// Whether a task may name this bait for this species: its usual fish have to
+/// stay on it, because a task asks for ordinary fish and plenty of them.
 pub fn bait_fits(xml: &str, species: &Species) -> bool {
     let usual = f64::from(species.small_grams + species.large_grams) / 2.0;
     drop_chance(bait_min_grams(xml), usual) < MOST_DROPPED
+}
+
+/// Whether the species can be caught on this bait at all: its heaviest fish
+/// must reach the bait's floor, or every single one comes off. Уклейка tops out
+/// at 218 g against хлеб's 500, so хлеб is no bait of hers; голавль reaches
+/// 5 kg against жук's 3000 g, so жук is — for the big ones, which is how a
+/// trophy bait works.
+pub fn bait_possible(settings: &FishingSettings, xml: &str, species: &Species) -> bool {
+    f64::from(species.trophy_grams) * settings.top_weight_factor >= bait_min_grams(xml)
 }
 
 /// How often a fish of this weight comes off a bait of that size: the client

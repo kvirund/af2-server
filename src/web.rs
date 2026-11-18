@@ -20,6 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::game::advisor::{self, Forecast, Rod, Spot, Tackle};
+use crate::game::fishing;
 use crate::game::{LastCast, death, keepnet};
 use crate::storage::CharacterData;
 use crate::world::World;
@@ -325,8 +326,12 @@ struct SpeciesRef {
     night_factor: f64,
     /// Credits per kg: ordinary, large, trophy.
     price_per_kg: [f64; 3],
-    /// Empty: any bait.
+    /// Empty: any bait. Leaves out the baits no fish of this species can ever
+    /// stay on, which is not the same as the ones only its big fish stay on.
     baits: Vec<i32>,
+    /// Those of `baits` the species' usual fish come off more often than not,
+    /// so the pages can say they are for the big ones.
+    big_baits: Vec<i32>,
     locations: Vec<i32>,
 }
 
@@ -411,11 +416,27 @@ fn reference(world: &World) -> Reference {
                 likes_depth: one.likes_depth,
                 night_factor: one.night_factor,
                 price_per_kg: [per_kg, per_kg * market.large_price_factor, per_kg * market.trophy_price_factor].map(|price| price.round() / 100.0),
-                // Only the baits the fish actually stays on: the client lets
-                // anything lighter than the bait's size go, so naming such a
-                // bait here would send the player out for a fish that cannot
-                // be caught on it.
-                baits: one.baits.iter().copied().filter(|bait| world.catalog.get(*bait).is_some_and(|item| crate::game::fishing::bait_fits(&item.xml, one))).collect(),
+                // Baits a fish of this species can stay on. The client lets
+                // anything lighter than the bait's size go, so a bait even the
+                // species' heaviest never reaches is no bait of theirs at all.
+                baits: one
+                    .baits
+                    .iter()
+                    .copied()
+                    .filter(|bait| {
+                        world.catalog.get(*bait).is_some_and(|item| fishing::bait_possible(&settings.fishing, &item.xml, one))
+                    })
+                    .collect(),
+                big_baits: one
+                    .baits
+                    .iter()
+                    .copied()
+                    .filter(|bait| {
+                        world.catalog.get(*bait).is_some_and(|item| {
+                            fishing::bait_possible(&settings.fishing, &item.xml, one) && !fishing::bait_fits(&item.xml, one)
+                        })
+                    })
+                    .collect(),
                 locations,
             }
         })

@@ -423,6 +423,7 @@ function baitChip(id, base) {
   }
   return `<a class="chip" href="#/bait/${id}" title="Нет у персонажа и не продаётся здесь">${name}</a>`;
 }
+const bigBaitTip = (fish) => `Насадка крупная: обычный ${fish.name.toLowerCase()} с неё срывается чаще, чем остаётся. Ловится в основном крупная рыба этого вида.`;
 const timeTag = (night) => night ? `<span class="time-tag is-night">${icon('moon')}ночью</span>` : `<span class="time-tag is-day">${icon('sun')}днём</span>`;
 function depthText(row) {
   const above = row.bottom - row.depth;
@@ -701,7 +702,7 @@ async function viewFish(box, id) {
       </div>
       <div class="card where"><h3>Где живёт</h3>
         ${[...byBase.entries()].map(([base, names]) => `<div class="where-base"><b>${esc(baseName(base))}</b><span class="muted">${names.map(esc).join(', ')}</span></div>`).join('') || '<span class="muted">нигде</span>'}
-        <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base)).join('') : '<span class="chip have">любую наживку</span>'}</div></div>
+        <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base) + (fish.bigBaits.includes(bait) ? `<span class="time-tag" title="${esc(bigBaitTip(fish))}">крупная</span>` : '')).join('') : '<span class="chip have">любую наживку</span>'}</div></div>
     </div>
     <div class="section-title"><h2>Где и на что ловить</h2><span>${best.length ? `${Math.min(best.length, 25)} из ${best.length}, по улову этой рыбы в час` : ''}</span></div>
     ${best.length ? `<div class="list">${best.slice(0, 25).map((row, i) => optionRow(row, i, color, 'target', { species: id, showBase: true })).join('')}</div>`
