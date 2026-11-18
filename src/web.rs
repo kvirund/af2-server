@@ -329,9 +329,9 @@ struct SpeciesRef {
     /// Empty: any bait. Leaves out the baits no fish of this species can ever
     /// stay on, which is not the same as the ones only its big fish stay on.
     baits: Vec<i32>,
-    /// Those of `baits` the species' usual fish come off more often than not,
-    /// so the pages can say they are for the big ones.
-    big_baits: Vec<i32>,
+    /// For those of `baits` that do not hold the species' ordinary fish, the
+    /// size class they start holding at: 1 large and up, 2 trophies only.
+    bait_from_class: BTreeMap<i32, i32>,
     locations: Vec<i32>,
 }
 
@@ -427,14 +427,14 @@ fn reference(world: &World) -> Reference {
                         world.catalog.get(*bait).is_some_and(|item| fishing::bait_possible(&settings.fishing, &item.xml, one))
                     })
                     .collect(),
-                big_baits: one
+                bait_from_class: one
                     .baits
                     .iter()
                     .copied()
-                    .filter(|bait| {
-                        world.catalog.get(*bait).is_some_and(|item| {
-                            fishing::bait_possible(&settings.fishing, &item.xml, one) && !fishing::bait_fits(&item.xml, one)
-                        })
+                    .filter_map(|bait| {
+                        let item = world.catalog.get(bait)?;
+                        let class = fishing::bait_from_class(&settings.fishing, &item.xml, one);
+                        (class > 0 && class < 3).then_some((bait, class))
                     })
                     .collect(),
                 locations,

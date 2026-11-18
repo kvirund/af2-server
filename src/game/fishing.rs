@@ -263,13 +263,36 @@ pub fn bait_fits(xml: &str, species: &Species) -> bool {
     drop_chance(bait_min_grams(xml), usual) < MOST_DROPPED
 }
 
-/// Whether the species can be caught on this bait at all: its heaviest fish
-/// must reach the bait's floor, or every single one comes off. Уклейка tops out
-/// at 218 g against хлеб's 500, so хлеб is no bait of hers; голавль reaches
-/// 5 kg against жук's 3000 g, so жук is — for the big ones, which is how a
-/// trophy bait works.
+/// From which size class of this species a bait holds the fish: 0 ordinary and
+/// up, 1 large and up, 2 trophies only, 3 none of them, which means the species
+/// cannot be caught on it at all. Уклейка tops out at 218 g against хлеб's 500,
+/// so хлеб gives 3 and is no bait of hers; голавль runs 132..924 ordinary,
+/// 924..3357 large and 3357..5036 trophy against жук's 3000 g, so жук gives 2.
+///
+/// One number is enough because the rule only ever lets fish go for being too
+/// light: once a class stays on, every heavier class stays on too.
+pub fn bait_from_class(settings: &FishingSettings, xml: &str, species: &Species) -> i32 {
+    let min_grams = bait_min_grams(xml);
+    let top = f64::from(species.trophy_grams) * settings.top_weight_factor;
+    let bands = [
+        (f64::from(species.small_grams), f64::from(species.large_grams)),
+        (f64::from(species.large_grams), f64::from(species.trophy_grams)),
+        (f64::from(species.trophy_grams), top),
+    ];
+    for (class, (from, to)) in bands.iter().enumerate() {
+        // The middle of the band stands for the class: at its lightest every
+        // bait would look worse than it plays out.
+        let typical = (from + to.max(*from)) / 2.0;
+        if drop_chance(min_grams, typical) < MOST_DROPPED {
+            return class as i32;
+        }
+    }
+    3
+}
+
+/// Whether the species can be caught on this bait at all.
 pub fn bait_possible(settings: &FishingSettings, xml: &str, species: &Species) -> bool {
-    f64::from(species.trophy_grams) * settings.top_weight_factor >= bait_min_grams(xml)
+    bait_from_class(settings, xml, species) < 3
 }
 
 /// How often a fish of this weight comes off a bait of that size: the client
