@@ -281,13 +281,15 @@ fn take_from_stack(stacks: bool, character: &mut CharacterData, id: i64, amount:
 
 /// Spends part of a stack such as bait. Lures and other single items stay.
 pub async fn use_up(conn: &Conn, player: &mut Player, id: i64, amount: i32) -> Result<()> {
-    let stacks = player
-        .data
-        .items
-        .iter()
-        .find(|item| item.id == id)
-        .and_then(|item| conn.world.catalog.get(item.template))
-        .is_some_and(|template| template.stacks);
+    let template = player.data.items.iter().find(|item| item.id == id).and_then(|item| conn.world.catalog.get(item.template));
+    // A thing that wears is spent a use at a time, not a piece at a time. The
+    // client counts those uses out of the item's durability — «Червь
+    // имитация(1 шт)5/5» — so one fish costs one of the five, and taking a
+    // whole piece threw the worm away on the first fish.
+    if template.is_some_and(|template| template.wears) {
+        return wear_down(conn, player, id, amount.max(1)).await;
+    }
+    let stacks = template.is_some_and(|template| template.stacks);
     match take_from_stack(stacks, &mut player.data, id, amount) {
         Used::NotAStack => return Ok(()),
         Used::Left(item) => {
@@ -296,6 +298,61 @@ pub async fn use_up(conn: &Conn, player: &mut Player, id: i64, amount: i32) -> R
         }
         Used::Gone => {
             conn.log(&format!("   -> 190 item {id} used up"));
+            send_removed(conn, id).await?;
+        }
+    }
+    conn.save(player).await
+}
+
+/// Spends `uses` of an item's durability; the piece is gone when none is left.
+/// A stack of such things wears its top piece and loses that one at zero, so a
+/// lot of five lasts five times as long as one.
+/// What wearing a piece down did to it.
+#[derive(Debug, PartialEq)]
+enum Worn {
+    /// Still has some left, at this durability.
+    Left(f32),
+    /// That piece is finished; this many are left, the next one whole.
+    NextPiece(i32),
+    /// The last piece is finished and the item is gone.
+    Gone,
+}
+
+/// Spends `uses` of a piece's durability. A stack wears its top piece and loses
+/// that one at zero, so a lot of five lasts five times as long as one.
+fn worn(durability: f32, count: i32, uses: i32) -> Worn {
+    let left = durability - uses as f32;
+    if left > 0.0 {
+        return Worn::Left(left);
+    }
+    if count > 1 { Worn::NextPiece(count - 1) } else { Worn::Gone }
+}
+
+async fn wear_down(conn: &Conn, player: &mut Player, id: i64, uses: i32) -> Result<()> {
+    let Some(item) = player.data.items.iter().find(|item| item.id == id) else {
+        return Ok(());
+    };
+    let fresh = conn.world.catalog.get(item.template).map_or(1.0, |template| template.durability);
+    let outcome = worn(item.durability, item.count, uses);
+    let Some(item) = player.data.items.iter_mut().find(|item| item.id == id) else {
+        return Ok(());
+    };
+    match outcome {
+        Worn::Left(durability) => {
+            item.durability = durability;
+            let item = item.clone();
+            conn.log(&format!("   -> 181 item {id} worn to {durability}"));
+            send_updates(conn, player.data.id, &[item]).await?;
+        }
+        Worn::NextPiece(count) => {
+            (item.count, item.durability) = (count, fresh);
+            let item = item.clone();
+            conn.log(&format!("   -> 181 item {id} worn out, {count} left"));
+            send_updates(conn, player.data.id, &[item]).await?;
+        }
+        Worn::Gone => {
+            player.data.items.retain(|held| held.id != id);
+            conn.log(&format!("   -> 190 item {id} worn out"));
             send_removed(conn, id).await?;
         }
     }
@@ -821,6 +878,17 @@ mod tests {
 
     fn catalog_item(stacks: bool, cost: i64) -> CatalogItem {
         CatalogItem { id: 10, kind: 10, cost, durability: 1.0, stacks, shop_count: 1, max_count: 99, premium_cost: 0, xml: String::new(), refine: String::new(), name: String::new(), cost_item: [0, 0], ..Default::default() }
+    }
+
+    #[test]
+    fn a_wearing_bait_is_spent_a_use_at_a_time() {
+        // Червь имитация: five uses, and the client shows them as 5/5.
+        assert_eq!(worn(5.0, 1, 1), Worn::Left(4.0));
+        assert_eq!(worn(1.0, 1, 1), Worn::Gone);
+        // A lot of three: the worn-out one goes and the next starts whole.
+        assert_eq!(worn(1.0, 3, 1), Worn::NextPiece(2));
+        // More uses at once than are left still only costs that piece.
+        assert_eq!(worn(2.0, 2, 5), Worn::NextPiece(1));
     }
 
     fn held(id: i64, cell: i32, template: i32) -> ItemEntry {
