@@ -8,7 +8,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::Local;
-use tokio::sync::Notify;
+use serde::Deserialize;
+use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::config::{Catalog, FishTable, Recipe, Settings};
 use crate::storage::{BoardTask, CharacterData, Storage, StoredGatherPoint};
@@ -59,9 +60,41 @@ impl Log {
     }
 }
 
+/// One change asked for from outside the game, carried to the connection that
+/// plays the character so the game's own code applies it and the client hears
+/// about it. `answer` says what happened, or why nothing did.
+#[derive(Debug)]
+pub struct AdminJob {
+    pub action: AdminAction,
+    pub answer: oneshot::Sender<Result<String, String>>,
+}
+
+/// What the admin API can ask for. Each one is served by the function the game
+/// itself uses, so nothing here is a second copy of a rule.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum AdminAction {
+    /// Puts items in the character's bags, as a shop or a reward would.
+    Give { template: i32, #[serde(default = "one")] count: i32 },
+    /// Experience as a caught fish gives it, level-ups and all.
+    Experience { amount: i32 },
+    Reputation { faction: i32, points: i64 },
+    Money { amount: i64 },
+    Premium { amount: i64 },
+    /// Pays a board task's reward and takes the task off the list.
+    FinishTask { task: i64 },
+    /// Takes a board task off the list and pays nothing.
+    DropTask { task: i64 },
+}
+
+fn one() -> i32 {
+    1
+}
+
 struct OnlineEntry {
     connection: u64,
     kick: Arc<Notify>,
+    admin: mpsc::Sender<AdminJob>,
 }
 
 /// Which connection is playing each character.
@@ -71,8 +104,8 @@ struct OnlineCharacters {
 }
 
 impl OnlineCharacters {
-    fn claim(&self, character: i64, connection: u64, kick: Arc<Notify>) -> bool {
-        let entry = OnlineEntry { connection, kick };
+    fn claim(&self, character: i64, connection: u64, kick: Arc<Notify>, admin: mpsc::Sender<AdminJob>) -> bool {
+        let entry = OnlineEntry { connection, kick, admin };
         let previous = self.entries.lock().expect("a game thread panicked").insert(character, entry);
         match previous {
             Some(old) if old.connection != connection => {
@@ -166,8 +199,22 @@ impl World {
 
     /// Marks a character as played by this connection and disconnects anyone
     /// already playing it: two owners would overwrite each other's saves.
-    pub fn claim(&self, character: i64, connection: u64, kick: Arc<Notify>) -> bool {
-        self.online.claim(character, connection, kick)
+    pub fn claim(&self, character: i64, connection: u64, kick: Arc<Notify>, admin: mpsc::Sender<AdminJob>) -> bool {
+        self.online.claim(character, connection, kick, admin)
+    }
+
+    /// The way in to a character being played, for the admin API. None means
+    /// nobody is playing it, and nothing outside the game may touch a save the
+    /// game would write over anyway.
+    pub fn admin_channel(&self, character: i64) -> Option<mpsc::Sender<AdminJob>> {
+        let entries = self.online.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        entries.get(&character).map(|entry| entry.admin.clone())
+    }
+
+    /// Who is playing right now, for the admin API to name them.
+    pub fn online_characters(&self) -> Vec<i64> {
+        let entries = self.online.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        entries.keys().copied().collect()
     }
 
     pub fn release(&self, character: i64, connection: u64) {
@@ -223,23 +270,28 @@ impl World {
 mod tests {
     use super::*;
 
+    /// A channel nobody reads: these tests only care who holds the character.
+    fn jobs() -> mpsc::Sender<AdminJob> {
+        mpsc::channel(1).0
+    }
+
     #[tokio::test]
     async fn a_second_connection_kicks_the_first() {
         let online = OnlineCharacters::default();
         let first = Arc::new(Notify::new());
-        assert!(!online.claim(1, 10, first.clone()));
-        assert!(online.claim(1, 20, Arc::new(Notify::new())));
+        assert!(!online.claim(1, 10, first.clone(), jobs()));
+        assert!(online.claim(1, 20, Arc::new(Notify::new()), jobs()));
         first.notified().await;
     }
 
     #[test]
     fn a_kicked_connection_cannot_release_its_successor() {
         let online = OnlineCharacters::default();
-        online.claim(1, 10, Arc::new(Notify::new()));
-        online.claim(1, 20, Arc::new(Notify::new()));
+        online.claim(1, 10, Arc::new(Notify::new()), jobs());
+        online.claim(1, 20, Arc::new(Notify::new()), jobs());
         online.release(1, 10);
 
         let kick = Arc::new(Notify::new());
-        assert!(online.claim(1, 30, kick), "connection 20 should still hold the character");
+        assert!(online.claim(1, 30, kick, jobs()), "connection 20 should still hold the character");
     }
 }

@@ -219,7 +219,7 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
     }
 
     session.leave();
-    if world.claim(character_id, session.conn.number, session.kick.clone()) {
+    if world.claim(character_id, session.conn.number, session.kick.clone(), session.admin.clone()) {
         session.conn.log("   took the character over from another connection");
     }
     let player = session.player.insert(Player::new(data));

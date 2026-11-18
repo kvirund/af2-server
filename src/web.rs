@@ -27,6 +27,8 @@ use crate::world::World;
 const PAGE: &str = include_str!("web/index.html");
 const MOST_REQUEST_BYTES: usize = 16 * 1024;
 const JSON: &str = "application/json; charset=utf-8";
+/// How long an admin change may take before the asker is told it did not land.
+const ADMIN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub async fn serve(listener: TcpListener, world: Arc<World>) {
     loop {
@@ -52,11 +54,25 @@ async fn answer(mut stream: TcpStream, world: &World) -> Result<()> {
         }
         request.extend_from_slice(&chunk[..read]);
     }
-    let head = String::from_utf8_lossy(&request);
-    let mut words = head.lines().next().unwrap_or("").split(' ');
+    // A POST body may trail the headers; read the rest of it before answering.
+    let text = String::from_utf8_lossy(&request).into_owned();
+    let length = header(&text, "content-length").and_then(|value| value.parse::<usize>().ok()).unwrap_or(0);
+    let head_bytes = text.find("\r\n\r\n").map_or(request.len(), |at| at + 4);
+    while request.len() < head_bytes + length.min(MOST_REQUEST_BYTES) {
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        request.extend_from_slice(&chunk[..read]);
+    }
+    let whole = String::from_utf8_lossy(&request).into_owned();
+    let body_text = whole.get(head_bytes..).unwrap_or("").to_string();
+
+    let mut words = whole.lines().next().unwrap_or("").split(' ');
     let (status, kind, body) = match (words.next(), words.next()) {
         (Some("GET"), Some(target)) => route(world, target).await,
-        _ => ("405 Method Not Allowed", "text/plain; charset=utf-8", "GET only".to_string()),
+        (Some("POST"), Some(target)) => post(world, target, &whole, &body_text).await,
+        _ => ("405 Method Not Allowed", "text/plain; charset=utf-8", "GET or POST".to_string()),
     };
     let reply = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
@@ -66,6 +82,79 @@ async fn answer(mut stream: TcpStream, world: &World) -> Result<()> {
     stream.write_all(body.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(())
+}
+
+/// One request header's value, by its lowercase name.
+fn header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+    request
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .filter_map(|line| line.split_once(':'))
+        .find(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.trim())
+}
+
+/// The secret that unlocks the admin API. `AF2_ADMIN_TOKEN` comes first so a
+/// real one need never be written into `config/settings.json`, which is in the
+/// repository and goes out with every release.
+fn admin_token(world: &World) -> String {
+    match std::env::var("AF2_ADMIN_TOKEN") {
+        Ok(token) if !token.trim().is_empty() => token,
+        _ => world.settings.server.admin_token.clone(),
+    }
+}
+
+/// Changes, as against the pages' read-only GETs. The token keeps a page open
+/// in a browser from sending these behind the player's back: localhost is no
+/// wall, any site can POST to it. An empty `server.adminToken` turns the whole
+/// thing off, which is how it ships.
+async fn post(world: &World, target: &str, request: &str, body: &str) -> (&'static str, &'static str, String) {
+    let plain = "text/plain; charset=utf-8";
+    let wanted = admin_token(world);
+    let wanted = wanted.trim();
+    if wanted.is_empty() {
+        return ("404 Not Found", plain, "админский доступ выключен: задай AF2_ADMIN_TOKEN".into());
+    }
+    if header(request, "x-admin-token") != Some(wanted) {
+        world.log.line(&format!("web: admin request to {target} without the token"));
+        return ("403 Forbidden", plain, "нужен заголовок X-Admin-Token".into());
+    }
+    let (path, args) = query(target);
+    match path {
+        "/api/admin/do" => admin_do(world, &args, body).await,
+        _ => ("404 Not Found", plain, "not found".into()),
+    }
+}
+
+/// Hands one change to the connection playing the character and waits for it.
+async fn admin_do(world: &World, args: &HashMap<&str, &str>, body: &str) -> (&'static str, &'static str, String) {
+    let plain = "text/plain; charset=utf-8";
+    let Some(character) = args.get("character").and_then(|value| value.parse::<i64>().ok()) else {
+        return ("400 Bad Request", plain, "нужен ?character=<id>".into());
+    };
+    let action: crate::world::AdminAction = match serde_json::from_str(body) {
+        Ok(action) => action,
+        Err(error) => return ("400 Bad Request", plain, format!("тело запроса: {error}")),
+    };
+    let Some(channel) = world.admin_channel(character) else {
+        let online = world.online_characters();
+        return (
+            "409 Conflict",
+            plain,
+            format!("персонаж {character} не в игре, менять его некому; сейчас играют: {online:?}"),
+        );
+    };
+    let (answer, wait) = tokio::sync::oneshot::channel();
+    let job = crate::world::AdminJob { action, answer };
+    if channel.send(job).await.is_err() {
+        return ("409 Conflict", plain, "соединение персонажа закрылось".into());
+    }
+    match tokio::time::timeout(ADMIN_WAIT, wait).await {
+        Ok(Ok(Ok(said))) => ("200 OK", plain, said),
+        Ok(Ok(Err(refused))) => ("422 Unprocessable Entity", plain, refused),
+        Ok(Err(_)) => ("409 Conflict", plain, "соединение персонажа закрылось".into()),
+        Err(_) => ("504 Gateway Timeout", plain, "персонаж не ответил вовремя".into()),
+    }
 }
 
 fn query(target: &str) -> (&str, HashMap<&str, &str>) {
@@ -589,6 +678,31 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headers_are_found_whatever_their_case() {
+        let request = "POST /api/admin/do HTTP/1.1\r\nHost: x\r\nX-Admin-Token:  hunter2 \r\nContent-Length: 7\r\n\r\nbody...";
+        assert_eq!(header(request, "x-admin-token"), Some("hunter2"));
+        assert_eq!(header(request, "content-length"), Some("7"));
+        assert_eq!(header(request, "authorization"), None);
+        // Past the blank line it is the body, not a header.
+        assert_eq!(header("GET / HTTP/1.1\r\n\r\nX-Admin-Token: no\r\n", "x-admin-token"), None);
+    }
+
+    #[test]
+    fn an_admin_action_reads_as_the_client_writes_it() {
+        use crate::world::AdminAction;
+        let read = |text| serde_json::from_str::<AdminAction>(text).expect("the action");
+        assert!(matches!(read(r#"{"do":"give","template":1180,"count":3}"#), AdminAction::Give { template: 1180, count: 3 }));
+        // Count is optional and means one.
+        assert!(matches!(read(r#"{"do":"give","template":1270}"#), AdminAction::Give { template: 1270, count: 1 }));
+        assert!(matches!(read(r#"{"do":"experience","amount":64}"#), AdminAction::Experience { amount: 64 }));
+        assert!(matches!(read(r#"{"do":"reputation","faction":1,"points":40}"#), AdminAction::Reputation { faction: 1, points: 40 }));
+        assert!(matches!(read(r#"{"do":"finish_task","task":409}"#), AdminAction::FinishTask { task: 409 }));
+        assert!(matches!(read(r#"{"do":"drop_task","task":409}"#), AdminAction::DropTask { task: 409 }));
+        assert!(serde_json::from_str::<AdminAction>(r#"{"do":"delete_everything"}"#).is_err());
+        assert!(serde_json::from_str::<AdminAction>(r#"{"do":"give"}"#).is_err(), "a template is required");
+    }
 
     #[test]
     fn the_query_gives_its_numbers() {

@@ -569,6 +569,20 @@ pub async fn fish_kept(conn: &Conn, player: &mut Player, fish: &CaughtFish) -> R
     conn.save(player).await
 }
 
+/// Pays a task's reward and tells the client it is done and gone, the way
+/// counting the last fish toward it would have. The caller has already taken
+/// the task off the character's list.
+pub(super) async fn pay_and_close(conn: &Conn, player: &mut Player, task: &BoardTask) -> Result<()> {
+    send_events(conn, &[(FINISHED, task.id)]).await?;
+    reward(conn, player, task).await?;
+    send_events(conn, &[(REMOVE, task.id)]).await
+}
+
+/// Tells the client a task is gone, with nothing paid for it.
+pub(super) async fn close_without_reward(conn: &Conn, task: &BoardTask) -> Result<()> {
+    send_events(conn, &[(REMOVE, task.id)]).await
+}
+
 /// Gives what a done task's reward line says and says so in the chat.
 async fn reward(conn: &Conn, player: &mut Player, task: &BoardTask) -> Result<()> {
     let mut said = Vec::new();

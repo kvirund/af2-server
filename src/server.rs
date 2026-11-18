@@ -21,6 +21,9 @@ use crate::world::World;
 
 const EXPECTED_APP: &str = "AFCServer";
 const OUTGOING_QUEUE: usize = 256;
+/// Admin jobs waiting for this connection. A couple at a time is plenty: the
+/// web side waits for each answer before it sends the next.
+const ADMIN_QUEUE: usize = 8;
 const HEX_LIMIT: usize = 64;
 
 async fn write_frames(mut socket: OwnedWriteHalf, mut frames: mpsc::Receiver<Vec<u8>>) {
@@ -39,16 +42,23 @@ pub async fn run_connection(stream: TcpStream, remote: SocketAddr, number: u64, 
     tokio::spawn(write_frames(writer, receiver));
 
     let kick = Arc::new(Notify::new());
+    let (admin_sender, mut admin_jobs) = mpsc::channel(ADMIN_QUEUE);
     let conn = Conn::new(number, sender, world);
     conn.log(&format!("connected from {remote}"));
 
-    let mut session = Session::new(conn, kick.clone());
+    let mut session = Session::new(conn, kick.clone(), admin_sender);
     let mut gaps = BTreeMap::new();
     let started = Instant::now();
 
     loop {
         let frame = tokio::select! {
             frame = photon::read_frame(&mut reader) => frame,
+            // A change asked for on the web port. It runs here, between
+            // messages, so it owns the character like every other handler.
+            Some(job) = admin_jobs.recv() => {
+                game::admin::run(&mut session, job).await;
+                continue;
+            }
             () = kick.notified() => {
                 session.conn.log("character opened from another connection; closing this one");
                 break;

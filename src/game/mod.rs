@@ -1,6 +1,7 @@
 //! Game rules, one file per system. Handlers run on the connection's own task
 //! and own the character they change.
 
+pub mod admin;
 mod board;
 mod cards;
 mod chat;
@@ -187,11 +188,14 @@ pub struct Session {
     pub account: Option<Account>,
     pub player: Option<Player>,
     kick: Arc<Notify>,
+    /// Handed to the world when the character is claimed, so the admin API can
+    /// reach this connection while it holds them.
+    admin: tokio::sync::mpsc::Sender<crate::world::AdminJob>,
 }
 
 impl Session {
-    pub fn new(conn: Conn, kick: Arc<Notify>) -> Self {
-        Self { conn, account: None, player: None, kick }
+    pub fn new(conn: Conn, kick: Arc<Notify>, admin: tokio::sync::mpsc::Sender<crate::world::AdminJob>) -> Self {
+        Self { conn, account: None, player: None, kick, admin }
     }
 
     pub fn leave(&mut self) {

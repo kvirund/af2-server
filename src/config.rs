@@ -25,6 +25,9 @@ pub struct ServerSettings {
     pub web_bind: String,
     #[serde(default)]
     pub web_port: u16,
+    /// Shared secret for the admin API on the web port. Empty: no admin API.
+    #[serde(default)]
+    pub admin_token: String,
 }
 
 fn local_address() -> String {
