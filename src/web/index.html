@@ -348,6 +348,7 @@ const state = {
   world: null, characters: [], loadedAt: 0,
   who: store.get('who', ''), base: store.get('base', 'here'), time: store.get('time', 'now'), scope: store.get('scope', 'shop'),
   tackle: store.get('tackle', 'auto'), goal: store.get('goal', 'money'), fight: store.get('fight', 20), bottom: store.get('bottom', 200),
+  size: store.get('size', 'any'),
   query: '', theme: store.get('theme', 'auto'),
 };
 const cache = new Map();
@@ -361,12 +362,16 @@ async function get(url) {
 async function adviceFor(extra = {}) {
   const params = new URLSearchParams();
   if (state.who) params.set('character', state.who);
-  if (state.base !== 'here') params.set('base', state.base);
+  const spot = chosenLocation();
+  if (spot !== null) params.set('location', spot);
+  else if (state.base !== 'here') params.set('base', state.base);
   if (state.time !== 'now') params.set('time', state.time);
   params.set('scope', state.scope);
   if (state.tackle !== 'auto') params.set('tackle', state.tackle);
   params.set('goal', state.goal);
   params.set('bottom', state.bottom);
+  // The target size belongs to hunting one species: it only narrows a species query.
+  if (state.size !== 'any' && extra.species !== undefined) params.set('size', state.size);
   for (const [key, value] of Object.entries(extra)) if (value !== undefined && value !== null) params.set(key, value);
   const url = '/api/advisor?' + params;
   const hit = cache.get(url);
@@ -390,6 +395,26 @@ function index() {
 const placeName = (id) => locationOf.get(id)?.name ?? `локация ${id}`;
 const speciesName = (id) => speciesById.get(id)?.name ?? `вид ${id}`;
 const baitName = (id) => baitById.get(id)?.name ?? `наживка ${id}`;
+/* The place picker holds one value: 'here', 'all', a base id, or 'loc:<id>' for one location. */
+const chosenLocation = () => String(state.base).startsWith('loc:') ? Number(String(state.base).slice(4)) : null;
+const chosenBase = () => {
+  const one = chosenLocation();
+  if (one !== null) return locationOf.get(one)?.base ?? null;
+  if (state.base === 'here') return advice?.character.base ?? null;
+  return state.base === 'all' ? null : Number(state.base);
+};
+/* The target size: a class number the forecast counts by, or null for any. */
+const SIZE_CLASS = { ordinary: 0, large: 1, trophy: 2 };
+const SIZE_TITLE = ['обычная', 'крупная', 'трофей'];
+const SIZE_RATE = ['обычных', 'крупных', 'трофеев'];
+const targetClass = () => SIZE_CLASS[state.size] ?? null;
+/* Whether a species lives in the chosen place; true everywhere when none is chosen. */
+const atChosenPlace = (one) => {
+  const spot = chosenLocation();
+  if (spot !== null) return one.locations.includes(spot);
+  const here = chosenBase();
+  return here === null || one.locations.some((location) => locationOf.get(location)?.base === here);
+};
 
 /* Rates: the client asks for a bite every few seconds; a bite then takes the fight and a new cast. */
 const bitesPerHour = (chance) => chance > 0 ? 3600 / (W().biteRequestSeconds / chance + Number(state.fight || 0)) : 0;
@@ -495,11 +520,15 @@ function seg(name, value, options) {
   return `<div class="seg" role="group">${options.map(([id, title, ic]) => `<button data-set="${name}" data-value="${id}" class="${String(value) === String(id) ? 'on' : ''}">${ic ? icon(ic) : ''}${title}</button>`).join('')}</div>`;
 }
 function filterBar(parts) {
-  const bases = `<select class="pick" data-pick="base"><option value="here" ${state.base === 'here' ? 'selected' : ''}>Где персонаж</option><option value="all" ${state.base === 'all' ? 'selected' : ''}>Все базы</option>${W().bases.map((base) => `<option value="${base.id}" ${String(state.base) === String(base.id) ? 'selected' : ''}>${esc(base.name)}</option>`).join('')}</select>`;
+  const chosen = (value) => String(state.base) === String(value) ? ' selected' : '';
+  const places = W().bases.map((base) => `<optgroup label="${esc(base.name)}"><option value="${base.id}"${chosen(base.id)}>Вся база</option>${
+    base.locations.map((one) => `<option value="loc:${one.id}"${chosen(`loc:${one.id}`)}>${esc(one.name)}</option>`).join('')}</optgroup>`).join('');
+  const bases = `<select class="pick" data-pick="base"><option value="here"${chosen('here')}>Где персонаж</option><option value="all"${chosen('all')}>Все базы</option>${places}</select>`;
   const pieces = {
-    base: `<div class="filter"><span>База</span>${bases}</div>`,
+    base: `<div class="filter"><span>Место</span>${bases}</div>`,
     time: `<div class="filter"><span>Время</span>${seg('time', state.time, [['now', 'Сейчас', 'clock'], ['day', 'День', 'sun'], ['night', 'Ночь', 'moon'], ['both', 'Сутки']])}</div>`,
     scope: `<div class="filter"><span>Наживки</span>${seg('scope', state.scope, [['mine', 'Мои'], ['shop', 'Мои и в магазине'], ['all', 'Все']])}</div>`,
+    size: `<div class="filter"><span>Размер</span>${seg('size', state.size, [['any', 'Любой'], ['ordinary', 'Обычная'], ['large', 'Крупная'], ['trophy', 'Трофей']])}</div>`,
     tackle: `<div class="filter"><span>Снасть</span>${seg('tackle', state.tackle === 'auto' || state.tackle === 'none' ? state.tackle : 'auto', [['auto', 'Мои удочки'], ['none', 'Без предела']])}</div>`,
     search: `<div class="search">${icon('search')}<input id="search" type="search" placeholder="Найти по названию" value="${esc(state.query)}" autocomplete="off"></div>`,
   };
@@ -520,8 +549,11 @@ function optionRow(row, i, color, lead, options = {}) {
   ];
   if (options.species) {
     const one = row.species.find((s) => s.id === options.species);
+    const cls = targetClass();
     stats.splice(0, 4,
-      ['target', n1.format(rate.bites * one.share * (1 - Math.max(0, one.lost))), `${speciesName(options.species).toLowerCase()}/час`],
+      cls === null
+        ? ['target', n1.format(rate.bites * one.share * (1 - Math.max(0, one.lost))), `${speciesName(options.species).toLowerCase()}/час`]
+        : ['target', n1.format(rate.bites * one.share * one.byClass[cls]), `${SIZE_RATE[cls]}/час`],
       ['share', pct(one.share), 'доля клёва'],
       ['weight', weight(one.grams), 'средний вес'],
       ['money', money(rate.money), 'кр./час']);
@@ -529,7 +561,7 @@ function optionRow(row, i, color, lead, options = {}) {
   const warnings = [];
   if (row.noRod) warnings.push(`<span class="chip bad">${icon('warn')}нет удочки под эту наживку</span>`);
   if (row.lost > 0.05) warnings.push(`<span class="chip bad" title="Тяжелее, чем держит снасть: клиент её отпускает">сходит ${pct(row.lost)}</span>`);
-  const place = `<b>${esc(placeName(row.location))}</b>${state.base === 'here' && !options.showBase ? '' : `<span class="muted">${esc(baseName(row.base))}</span>`}`;
+  const place = `<b>${esc(placeName(row.location))}</b>${(state.base === 'here' || chosenLocation() !== null) && !options.showBase ? '' : `<span class="muted">${esc(baseName(row.base))}</span>`}`;
   return `<article class="card opt ${i === 0 ? 'best' : ''}" data-row="${i}">
     <div class="rank">${i + 1}</div>
     <div><div class="opt-title">${place}</div>
@@ -593,11 +625,11 @@ async function viewBaits(box) {
   setHeader('Наживки', VIEWS[1].hint);
   $('filters').innerHTML = filterBar(['search', 'base']);
   if (!advice) { advice = await adviceFor({ bait: -1 }); drawWho(); }
-  const here = state.base === 'here' ? advice.character.base : state.base === 'all' ? null : Number(state.base);
+  const here = chosenBase();
   const q = state.query.trim().toLowerCase();
   const groups = [10, 11, 12].map((kind) => {
     const baits = W().baits.filter((bait) => bait.kind === kind && (!q || bait.name.toLowerCase().includes(q)))
-      .filter((bait) => here === null || W().species.some((one) => one.baits.includes(bait.id) && one.locations.some((location) => locationOf.get(location)?.base === here)));
+      .filter((bait) => (here === null && chosenLocation() === null) || W().species.some((one) => one.baits.includes(bait.id) && atChosenPlace(one)));
     if (!baits.length) return '';
     const tiles = baits.map((bait) => {
       const owned = advice.owned[bait.id] || 0, takers = baitStats(bait).takers.length;
@@ -670,10 +702,8 @@ async function viewFishList(box) {
   setHeader('Рыбы', VIEWS[2].hint);
   $('filters').innerHTML = filterBar(['search', 'base']);
   if (!advice) { advice = await adviceFor({ bait: -1 }); drawWho(); }
-  const here = state.base === 'here' ? advice.character.base : state.base === 'all' ? null : Number(state.base);
   const q = state.query.trim().toLowerCase();
-  const fish = W().species.filter((one) => (!q || one.name.toLowerCase().includes(q)) && one.locations.length
-    && (here === null || one.locations.some((location) => locationOf.get(location)?.base === here)));
+  const fish = W().species.filter((one) => (!q || one.name.toLowerCase().includes(q)) && one.locations.length && atChosenPlace(one));
   const tiles = fish.map((one) => {
     const bases = [...new Set(one.locations.map((location) => locationOf.get(location)?.base).filter(Boolean))];
     const mine = one.baits.filter((bait) => advice.owned[bait]).length;
@@ -685,10 +715,27 @@ async function viewFishList(box) {
   box.innerHTML = fish.length ? `<div class="grid">${tiles}</div>` : empty('Ничего не нашлось', 'Попробуй другое название или «Все базы».');
 }
 
+/* Which tackle lands the target size: what the character has, and what to buy. */
+const TACKLE_CELL_NAME = { 1: 'Удилище', 2: 'Катушка', 3: 'Леска' };
+function tackleBlock(one) {
+  if (!one) return '';
+  const mine = one.mine.length
+    ? one.mine.map((rod) => `<div class="where-base"><b>${rod.enough ? '✓' : '✗'} ${esc(rod.name)}</b><span class="muted">держит ${
+        rod.limitGrams ? weight(rod.limitGrams) : 'без предела'}${rod.weakName ? ` · слабое звено: ${esc(rod.weakName)}, ${n1.format(rod.weakTestKg)} кг` : ''}</span></div>`).join('')
+    : '<span class="muted">удочек под её наживки нет</span>';
+  const buy = one.buy.map((pick) => `<div class="where-base"><b>${TACKLE_CELL_NAME[pick.cell] ?? pick.cell}</b><span class="muted">${
+    pick.item
+      ? `${esc(pick.item.name)} · тест ${n1.format(pick.item.testKg)} кг · ${pick.item.cost > 0 ? money(pick.item.cost / 100) : `${n0.format(pick.item.premiumCost)} эрг`}${pick.item.level > 1 ? ` · с ур. ${pick.item.level}` : ''}`
+      : `нужен тест от ${n1.format(pick.needTestKg)} кг — здесь такого не продают`}</span></div>`).join('');
+  return `<div class="card where" style="grid-column:1/-1"><h3>Чем брать: ${SIZE_TITLE[one.class]} до ${weight(one.needGrams)}</h3>${mine}
+    <h3>Дешевле всего на этой базе</h3>${buy}
+    <small class="muted">Клиент отпускает рыбу тяжелее 2,5 × теста самого слабого из удилища и лески, поэтому «держит» — это про них; катушка считается, только когда у сервера есть свой предел.</small></div>`;
+}
+
 async function viewFish(box, id) {
   const fish = speciesById.get(id);
   setHeader(fish ? fish.name : 'Рыба', 'Где живёт, на что берёт и где её ловить лучше всего.');
-  $('filters').innerHTML = filterBar(['base', 'time', 'scope', 'tackle']);
+  $('filters').innerHTML = filterBar(['base', 'size', 'time', 'scope', 'tackle']);
   box.innerHTML = loading();
   advice = await adviceFor({ species: id });
   drawWho();
@@ -724,13 +771,19 @@ async function viewFish(box, id) {
       <div class="card where"><h3>Где живёт</h3>
         ${[...byBase.entries()].map(([base, names]) => `<div class="where-base"><b>${esc(baseName(base))}</b><span class="muted">${names.map(esc).join(', ')}</span></div>`).join('') || '<span class="muted">нигде</span>'}
         <h3>Берёт</h3><div class="chips">${fish.baits.length ? fish.baits.map((bait) => baitChip(bait, advice.character.base, baitClassMark(fish, bait))).join('') : '<span class="chip have">любую наживку</span>'}</div>${baitClassLegend(fish)}</div>
+      ${tackleBlock(advice.tackleAdvice)}
     </div>
-    <div class="section-title"><h2>Где и на что ловить</h2><span>${best.length ? `${Math.min(best.length, 25)} из ${best.length}, по улову этой рыбы в час` : ''}</span></div>
+    <div class="section-title"><h2>Где и на что ловить</h2><span>${best.length ? `${Math.min(best.length, 25)} из ${best.length}, по улову ${targetClass() === null ? 'этой рыбы' : SIZE_RATE[targetClass()]} в час` : ''}</span></div>
     ${best.length ? `<div class="list">${best.slice(0, 25).map((row, i) => optionRow(row, i, color, 'target', { species: id, showBase: true, fish })).join('')}</div>`
-      : empty('Не найдено', state.scope === 'mine' ? 'Твоими наживками её здесь не поймать — попробуй «Мои и в магазине» или «Все».' : state.base === 'all' ? 'Под выбранные условия она не клюёт.' : 'На этой базе её нет или она не клюёт в это время — попробуй «Все базы» или «Сутки».')}
+      : empty('Не найдено', state.scope === 'mine' ? 'Твоими наживками её здесь не поймать — попробуй «Мои и в магазине» или «Все».' : state.base === 'all' ? 'Под выбранные условия она не клюёт.' : chosenLocation() !== null ? 'На этой локации её нет или она не клюёт в это время — попробуй «Вся база» или «Сутки».' : 'На этой базе её нет или она не клюёт в это время — попробуй «Все базы» или «Сутки».')}
     ${methodNote()}`;
 }
-const speciesRate = (row, id) => { const one = row.species.find((s) => s.id === id); return one ? bitesPerHour(row.chance) * one.share * (1 - Math.max(0, one.lost)) : 0; };
+const speciesRate = (row, id) => {
+  const one = row.species.find((s) => s.id === id);
+  if (!one) return 0;
+  const cls = targetClass();
+  return bitesPerHour(row.chance) * one.share * (cls === null ? 1 - Math.max(0, one.lost) : one.byClass[cls]);
+};
 
 async function viewTackle(box) {
   setHeader('Снасти', VIEWS[3].hint);

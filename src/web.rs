@@ -179,6 +179,15 @@ async fn route(world: &World, target: &str) -> (&'static str, &'static str, Stri
     }
 }
 
+/// The base a fishing location belongs to; location 0 is every base itself and
+/// names none of them.
+fn base_of(world: &World, location: i32) -> Option<i32> {
+    if location == 0 {
+        return None;
+    }
+    world.settings.bases.iter().find(|(_, info)| info.locations.contains(&location)).map(|(base, _)| *base)
+}
+
 fn base_name(world: &World, base: i32) -> String {
     world.settings.bases.get(&base).map_or_else(|| format!("база {base}"), |found| found.name.clone())
 }
@@ -493,6 +502,8 @@ struct AdviceQuery {
     character: Option<i64>,
     /// None: every base.
     base: Option<Option<i32>>,
+    /// One fishing location, which names its own base and overrides `base`.
+    location: Option<i32>,
     /// The phases to work out: day, night or both; None: as it is now.
     nights: Option<Vec<bool>>,
     bottom: f64,
@@ -501,6 +512,8 @@ struct AdviceQuery {
     tackle: Option<Option<i32>>,
     bait: Option<i32>,
     species: Option<i32>,
+    /// The size class aimed at: 0 ordinary, 1 large, 2 trophy; None: any.
+    size: Option<usize>,
     goal: Goal,
     every_depth: bool,
 }
@@ -514,6 +527,7 @@ fn advice_query(args: &HashMap<&str, &str>) -> AdviceQuery {
             "all" => Some(None),
             other => other.parse().ok().map(Some),
         },
+        location: number("location").map(|location| location as i32).filter(|location| *location != 0),
         nights: match text("time") {
             "day" => Some(vec![false]),
             "night" => Some(vec![true]),
@@ -532,6 +546,12 @@ fn advice_query(args: &HashMap<&str, &str>) -> AdviceQuery {
         },
         bait: number("bait").map(|bait| bait as i32),
         species: number("species").map(|species| species as i32),
+        size: match text("size") {
+            "ordinary" => Some(0),
+            "large" => Some(1),
+            "trophy" => Some(2),
+            _ => None,
+        },
         goal: match text("goal") {
             "experience" => Goal::Experience,
             "bites" => Goal::Bites,
@@ -577,18 +597,27 @@ struct Advice {
     owned: BTreeMap<i32, i32>,
     /// The base worked out, none for every base.
     base: Option<i32>,
+    /// The one location worked out, when the query named one.
+    location: Option<i32>,
+    /// The size class aimed at, when the query named one.
+    size: Option<usize>,
+    /// Which tackle lands that size of that species: only with both.
+    tackle_advice: Option<advisor::TackleAdvice>,
     nights: Vec<bool>,
     clock: Clock,
     rows: Vec<ForecastRow>,
 }
 
-fn score(goal: Goal, species: Option<i32>, forecast: &Forecast) -> f64 {
-    let per_bite = match (species, goal) {
-        (Some(species), _) => forecast.share_of(species),
-        (None, Goal::Money) => forecast.money,
-        (None, Goal::Experience) => forecast.experience,
-        (None, Goal::Bites) => 1.0,
-        (None, Goal::Trophies) => forecast.trophies,
+/// A target size outranks the goal: asked for trophies of a species, the best
+/// spot is the one that lands the most of them, whatever they are worth.
+fn score(goal: Goal, species: Option<i32>, size: Option<usize>, forecast: &Forecast) -> f64 {
+    let per_bite = match (species, size, goal) {
+        (_, Some(class), _) => forecast.class_share(species, class),
+        (Some(species), None, _) => forecast.share_of(species),
+        (None, None, Goal::Money) => forecast.money,
+        (None, None, Goal::Experience) => forecast.experience,
+        (None, None, Goal::Bites) => 1.0,
+        (None, None, Goal::Trophies) => forecast.trophies,
     };
     forecast.chance * per_bite
 }
@@ -607,7 +636,12 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
         None => world.store.load_character(id).await?.ok_or_else(|| anyhow::anyhow!("no character {id}"))?,
     };
     let here = live.as_ref().map_or(1, |live| live.base).max(1);
-    let base = query.base.unwrap_or(Some(here));
+    // A location names the base it belongs to, so picking one settles both.
+    let wanted = query.location.and_then(|location| Some((location, base_of(world, location)?)));
+    let base = match wanted {
+        Some((_, base)) => Some(base),
+        None => query.base.unwrap_or(Some(here)),
+    };
     let nights = query.nights.clone().unwrap_or_else(|| vec![advisor::is_night(world)]);
     let rods = advisor::rods(world, &data);
     let owned = advisor::baits_of(world, &data);
@@ -630,7 +664,7 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
             .map(|item| (item.id, item.kind))
             .collect();
         let locations = world.settings.bases.get(&base).map(|found| found.locations.clone()).unwrap_or_default();
-        for location in locations.into_iter().filter(|location| *location != 0) {
+        for location in locations.into_iter().filter(|location| *location != 0).filter(|location| wanted.is_none_or(|(one, _)| *location == one)) {
             if query.species.is_some_and(|species| !world.fish.by_location.get(&location).is_some_and(|ids| ids.contains(&species))) {
                 continue;
             }
@@ -663,9 +697,10 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
                         })
                         .filter(|forecast| forecast.chance > 0.0)
                         .filter(|forecast| query.species.is_none_or(|species| forecast.share_of(species) > 0.0))
+                        .filter(|forecast| query.size.is_none_or(|class| forecast.class_share(query.species, class) > 0.0))
                         .collect();
                     if !query.every_depth {
-                        found.sort_by(|a, b| score(query.goal, query.species, b).total_cmp(&score(query.goal, query.species, a)));
+                        found.sort_by(|a, b| score(query.goal, query.species, query.size, b).total_cmp(&score(query.goal, query.species, query.size, a)));
                         found.truncate(1);
                     }
                     rows.extend(found.into_iter().map(|forecast| ForecastRow { measured: cast.is_some(), no_rod, limit_grams: limit, forecast }));
@@ -673,7 +708,7 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
             }
         }
     }
-    rows.sort_by(|a, b| score(query.goal, query.species, &b.forecast).total_cmp(&score(query.goal, query.species, &a.forecast)));
+    rows.sort_by(|a, b| score(query.goal, query.species, query.size, &b.forecast).total_cmp(&score(query.goal, query.species, query.size, &a.forecast)));
     rows.truncate(MOST_ROWS);
     let advice = Advice {
         character: Who {
@@ -689,6 +724,12 @@ async fn advise(world: &World, query: AdviceQuery) -> Result<String> {
         rods,
         owned,
         base,
+        location: wanted.map(|(location, _)| location),
+        size: query.size,
+        tackle_advice: query
+            .species
+            .zip(query.size)
+            .and_then(|(species, class)| Some(advisor::tackle_advice(world, &data, world.fish.get(species)?, class, base.unwrap_or(here)))),
         nights,
         clock: clock(world),
         rows,
@@ -732,5 +773,24 @@ mod tests {
         assert_eq!(args.get("character"), Some(&"3"));
         assert_eq!(args.get("night"), Some(&"1"));
         assert_eq!(query("/").0, "/");
+    }
+
+    #[test]
+    fn a_place_query_reads_one_location() {
+        assert_eq!(advice_query(&query("/api/advisor?location=5").1).location, Some(5));
+        // The base itself is location 0 and names no place to fish.
+        assert_eq!(advice_query(&query("/api/advisor?location=0").1).location, None);
+        assert_eq!(advice_query(&query("/api/advisor?base=6").1).location, None);
+        assert_eq!(advice_query(&query("/api/advisor?base=6").1).base, Some(Some(6)));
+    }
+
+    #[test]
+    fn a_target_size_reads_as_a_class_number() {
+        let size = |text: &str| advice_query(&query(text).1).size;
+        assert_eq!(size("/api/advisor?size=ordinary"), Some(0));
+        assert_eq!(size("/api/advisor?size=large"), Some(1));
+        assert_eq!(size("/api/advisor?size=trophy"), Some(2));
+        assert_eq!(size("/api/advisor?size=any"), None);
+        assert_eq!(size("/api/advisor"), None);
     }
 }

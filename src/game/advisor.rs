@@ -10,7 +10,7 @@ use serde::Serialize;
 use super::fishing::{self, Cast, Odds, experience_for, fit_to_tackle, roll_weight};
 pub use super::fishing::{BITE_REQUEST_SECONDS, NIGHT_END_HOUR, NIGHT_START_HOUR};
 use super::{effects, keepnet, perks, reputation, shop, vip};
-use crate::config::CatalogItem;
+use crate::config::{CatalogItem, Species};
 use crate::storage::CharacterData;
 use crate::world::World;
 
@@ -60,11 +60,15 @@ pub struct Forecast {
     pub money: f64,
     pub experience: f64,
     pub trophies: f64,
+    /// Per bite, the fish landed of each size class: ordinary, large, trophy.
+    /// The last one is `trophies`; together they are one minus what gets away.
+    pub by_class: [f64; 3],
     pub lost: f64,
     pub species: Vec<SpeciesForecast>,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpeciesForecast {
     pub id: i32,
     /// Of the bites.
@@ -75,6 +79,8 @@ pub struct SpeciesForecast {
     pub money: f64,
     pub experience: f64,
     pub trophies: f64,
+    /// Per bite of the species, the fish landed of each size class.
+    pub by_class: [f64; 3],
     /// Of its bites, too heavy for the tackle.
     pub lost: f64,
 }
@@ -82,6 +88,15 @@ pub struct SpeciesForecast {
 impl Forecast {
     pub fn share_of(&self, species: i32) -> f64 {
         self.species.iter().find(|one| one.id == species).map_or(0.0, |one| one.share)
+    }
+
+    /// Per bite, the fish of that size class landed: of one species, or of all
+    /// of them when none is named.
+    pub fn class_share(&self, species: Option<i32>, class: usize) -> f64 {
+        match species {
+            Some(species) => self.species.iter().find(|one| one.id == species).map_or(0.0, |one| one.share * one.by_class[class]),
+            None => self.by_class[class],
+        }
     }
 }
 
@@ -110,6 +125,168 @@ pub struct Rod {
     /// The bait on it, 0 for none.
     pub bait: i32,
     pub parts: Vec<RodPart>,
+}
+
+/// The reel's cell and the item kinds of the three tackle pieces: a rod is a
+/// float, feeder or spinning one, then the reel and the line.
+const REEL_CELL: i32 = 2;
+const REEL_KIND: i32 = 4;
+const LINE_KIND: i32 = 5;
+const ROD_KINDS: [i32; 3] = [1, 2, SPINNING_ROD];
+
+/// The heaviest fish of a size class: ordinary run up to the large weight,
+/// large up to the trophy weight, and trophies up to the species' own top.
+pub fn class_top_grams(top_factor: f64, species: &Species, class: usize) -> f64 {
+    match class {
+        0 => f64::from(species.large_grams),
+        1 => f64::from(species.trophy_grams),
+        _ => f64::from(species.trophy_grams) * top_factor,
+    }
+}
+
+/// What a piece in this cell has to hold, in kg, for a fish of `grams` to stay
+/// on: the client lets go of anything over its test times [`CLIENT_ESCAPE_FACTOR`],
+/// and the server's own limit, when it has one, counts the reel in too.
+fn needed_test(factor: f64, cell: i32, grams: f64) -> f64 {
+    let server = if factor > 0.0 { grams / (factor * 1000.0) } else { 0.0 };
+    if cell == REEL_CELL { server } else { server.max(grams / (CLIENT_ESCAPE_FACTOR * 1000.0)) }
+}
+
+/// The heaviest fish this one piece would allow, the rest of the tackle aside.
+fn cell_limit(factor: f64, cell: i32, test: f64) -> f64 {
+    let server = if factor > 0.0 { test * factor * 1000.0 } else { f64::INFINITY };
+    if cell == REEL_CELL { server } else { server.min(test * CLIENT_ESCAPE_FACTOR * 1000.0) }
+}
+
+/// One of the character's rods against a target weight.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RodFit {
+    pub bag: i32,
+    pub name: String,
+    pub kind: i32,
+    pub limit_grams: Option<f64>,
+    /// Whether it lands the whole class without the fish getting away.
+    pub enough: bool,
+    /// The piece that gives out first: its cell, name and test.
+    pub weak_cell: Option<i32>,
+    pub weak_name: Option<String>,
+    pub weak_test_kg: Option<f64>,
+}
+
+/// A piece the shops here sell that would do.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartPick {
+    pub template: i32,
+    pub name: String,
+    pub kind: i32,
+    pub test_kg: f64,
+    /// In hundredths of a credit, as everywhere; ergs when there is no price.
+    pub cost: i64,
+    pub premium_cost: i64,
+    pub level: i32,
+}
+
+/// What to put in one cell to reach the target.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellPick {
+    pub cell: i32,
+    pub need_test_kg: f64,
+    /// The cheapest piece on this base that holds it; none when none does.
+    pub item: Option<PartPick>,
+}
+
+/// Which tackle lands a given size of a given species.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TackleAdvice {
+    pub species: i32,
+    pub class: usize,
+    /// The heaviest fish of that class, which the tackle has to hold.
+    pub need_grams: f64,
+    pub mine: Vec<RodFit>,
+    pub buy: Vec<CellPick>,
+}
+
+/// Rod kinds that take this species' baits: lures only go on spinning rods.
+fn rod_kinds_for(world: &World, species: &Species) -> Vec<i32> {
+    let kinds: Vec<i32> = species.baits.iter().filter_map(|bait| world.catalog.get(*bait)).map(|item| item.kind).collect();
+    match (kinds.iter().any(|kind| *kind == LURES), kinds.iter().any(|kind| *kind != LURES)) {
+        (true, false) => vec![SPINNING_ROD],
+        (false, true) => ROD_KINDS.iter().copied().filter(|kind| *kind != SPINNING_ROD).collect(),
+        _ => ROD_KINDS.to_vec(),
+    }
+}
+
+/// The cheapest piece of these kinds the base sells that holds the test. A
+/// price in credits beats one in ergs, which only the premium counter asks.
+fn cheapest<'a>(world: &'a World, base: i32, level: i32, kinds: &[i32], test: f64) -> Option<&'a CatalogItem> {
+    let key = |item: &CatalogItem| if item.cost > 0 { (0, item.cost) } else { (1, item.premium_cost) };
+    world
+        .catalog
+        .for_sale()
+        .chain(world.catalog.premium_only())
+        .filter(|item| kinds.contains(&item.kind))
+        .filter(|item| buyable(world, base, level, item.id))
+        .filter(|item| fishing::test_of_template(item).is_some_and(|own| own >= test))
+        .min_by_key(|item| key(item))
+}
+
+fn pick_of(item: &CatalogItem) -> PartPick {
+    PartPick {
+        template: item.id,
+        name: item.name.clone(),
+        kind: item.kind,
+        test_kg: fishing::test_of_template(item).unwrap_or(0.0),
+        cost: item.cost,
+        premium_cost: item.premium_cost,
+        level: shop::level_of(item),
+    }
+}
+
+fn rod_fit(factor: f64, rod: &Rod, need_grams: f64) -> RodFit {
+    let weak = rod
+        .parts
+        .iter()
+        .filter_map(|part| part.test_kg.filter(|test| *test > 0.0).map(|test| (part, test)))
+        .min_by(|a, b| cell_limit(factor, a.0.cell, a.1).total_cmp(&cell_limit(factor, b.0.cell, b.1)));
+    RodFit {
+        bag: rod.bag,
+        name: rod.name.clone(),
+        kind: rod.kind,
+        limit_grams: rod.limit_grams,
+        enough: rod.limit_grams.is_none_or(|limit| limit >= need_grams),
+        weak_cell: weak.map(|(part, _)| part.cell),
+        weak_name: weak.map(|(part, _)| part.name.clone()),
+        weak_test_kg: weak.map(|(_, test)| test),
+    }
+}
+
+/// What the character already has and what the base sells for landing fish of
+/// that size class, whole: the rod and the line carry the client's limit, the
+/// reel only counts when the server has a limit of its own.
+pub fn tackle_advice(world: &World, character: &CharacterData, species: &Species, class: usize, base: i32) -> TackleAdvice {
+    let factor = world.settings.fishing.tackle_weight_factor;
+    let need_grams = class_top_grams(world.settings.fishing.top_weight_factor, species, class);
+    let kinds = rod_kinds_for(world, species);
+    let mine = rods(world, character)
+        .iter()
+        .filter(|rod| kinds.contains(&rod.kind))
+        .map(|rod| rod_fit(factor, rod, need_grams))
+        .collect();
+    let buy = [(ROD_CELL, kinds.clone()), (REEL_CELL, vec![REEL_KIND]), (LINE_CELL, vec![LINE_KIND])]
+        .into_iter()
+        .map(|(cell, kinds)| (cell, kinds, needed_test(factor, cell, need_grams)))
+        .filter(|(_, _, test)| *test > 0.0)
+        .map(|(cell, kinds, test)| CellPick {
+            cell,
+            need_test_kg: test,
+            item: cheapest(world, base, character.level, &kinds, test).map(pick_of),
+        })
+        .collect();
+    TackleAdvice { species: species.id, class, need_grams, mine, buy }
 }
 
 fn name_of(world: &World, template: i32) -> String {
@@ -244,7 +421,7 @@ struct Sum {
     landed: f64,
     money: f64,
     experience: f64,
-    trophies: f64,
+    by_class: [f64; 3],
 }
 
 /// The tackle a forecast is for, in grams; infinite: no limit.
@@ -302,7 +479,7 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
                 sum.grams += f64::from(grams);
                 sum.money += keepnet::value_of(&world.fish, &settings.fish_market, species, grams, size_class) as f64 * price_factor / 100.0;
                 sum.experience += f64::from(experience_for(&settings.progression, grams, size_class, education)) * experience_factor;
-                sum.trophies += f64::from(u8::from(size_class == fishing::TROPHY_CLASS));
+                sum.by_class[(size_class.max(0) as usize).min(2)] += 1.0;
             }
             if hooked <= 0.0 {
                 continue;
@@ -318,7 +495,7 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
                     landed: part * sum.landed / hooked,
                     money: part * sum.money / hooked,
                     experience: part * sum.experience / hooked,
-                    trophies: part * sum.trophies / hooked,
+                    by_class: sum.by_class.map(|count| part * count / hooked),
                 },
             ));
         }
@@ -335,7 +512,8 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
             lost: (1.0 - sum.landed / sum.share).max(0.0),
             money: sum.money / sum.share,
             experience: sum.experience / sum.share,
-            trophies: sum.trophies / sum.share,
+            trophies: sum.by_class[fishing::TROPHY_CLASS as usize] / sum.share,
+            by_class: sum.by_class.map(|count| count / sum.share),
         })
         .collect();
     species.sort_by(|a, b| b.share.total_cmp(&a.share));
@@ -351,6 +529,7 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
         money: mean(|one| one.money),
         experience: mean(|one| one.experience),
         trophies: mean(|one| one.trophies),
+        by_class: [mean(|one| one.by_class[0]), mean(|one| one.by_class[1]), mean(|one| one.by_class[2])],
         lost: mean(|one| one.lost),
         species,
     }
@@ -359,6 +538,48 @@ pub fn forecast(world: &World, character: &CharacterData, spot: Spot, bait: i32,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn species() -> Species {
+        Species {
+            id: 7,
+            name: "Карп".into(),
+            small_grams: 100,
+            large_grams: 1000,
+            trophy_grams: 5000,
+            min_depth_cm: 0,
+            max_depth_cm: 0,
+            near_bottom: false,
+            likes_depth: false,
+            night_factor: 1.0,
+            hardy: false,
+            share: 2.0,
+            baits: vec![1010],
+        }
+    }
+
+    #[test]
+    fn a_size_class_tops_out_where_the_next_one_starts() {
+        let fish = species();
+        assert_eq!(class_top_grams(1.5, &fish, 0), 1000.0);
+        assert_eq!(class_top_grams(1.5, &fish, 1), 5000.0);
+        assert_eq!(class_top_grams(1.5, &fish, 2), 7500.0);
+    }
+
+    #[test]
+    fn the_rod_and_the_line_carry_the_clients_limit_and_the_reel_only_the_servers() {
+        // The client lands 2,5 × the test, so a 5 kg fish needs a 2 kg rod and line.
+        assert_eq!(needed_test(0.0, ROD_CELL, 5000.0), 2.0);
+        assert_eq!(needed_test(0.0, LINE_CELL, 5000.0), 2.0);
+        // With no limit of its own the server asks nothing of the reel.
+        assert_eq!(needed_test(0.0, REEL_CELL, 5000.0), 0.0);
+        // A server limit of 1 kg per kg of test is the stricter rule.
+        assert_eq!(needed_test(1.0, ROD_CELL, 5000.0), 5.0);
+        assert_eq!(needed_test(1.0, REEL_CELL, 5000.0), 5.0);
+        // And the same the other way round.
+        assert_eq!(cell_limit(0.0, ROD_CELL, 2.0), 5000.0);
+        assert_eq!(cell_limit(0.0, REEL_CELL, 2.0), f64::INFINITY);
+        assert_eq!(cell_limit(1.0, ROD_CELL, 2.0), 2000.0);
+    }
 
     #[test]
     fn lures_go_on_spinning_rods_and_baits_on_the_others() {

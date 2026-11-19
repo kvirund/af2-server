@@ -210,6 +210,11 @@ pub(super) fn test_of(world: &World, item: &ItemEntry) -> Option<f64> {
     test_kg(&inventory::item_xml(world, item))
 }
 
+/// The same for a piece nobody owns yet, straight from the catalogue.
+pub(super) fn test_of_template(item: &crate::config::CatalogItem) -> Option<f64> {
+    test_kg(&item.xml).filter(|test| *test > 0.0)
+}
+
 /// The same for the rod in this bag.
 pub(super) fn tackle_limit_in(test_of: &dyn Fn(&ItemEntry) -> Option<f64>, items: &[ItemEntry], bag: i32, factor: f64) -> f64 {
     if factor <= 0.0 {
