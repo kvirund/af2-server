@@ -32,6 +32,13 @@ const DEPTH_OFFSET: usize = 4 + 24 + 24;
 /// in a switch of its own and reaches it with that very number — class 0 holds
 /// 0..500, 1 holds 500..3000, 2 holds 3000..7000, 3 holds 7000..20000 and 4
 /// holds 20000..200000. Read from `Fisherman.klevAction` in Assembly-CSharp.
+///
+/// Only a live bait carries a real class here; a lure's second number is its
+/// own size (8, 15, 25...) and an imitation's is a tag (49, 1010), none of
+/// which the switch has a case for. Falling back to no floor at all is not a
+/// guess of ours: the client builds its answer as `(0, 10000, 0)` before the
+/// switch and returns it untouched for a number it does not know, and the
+/// floor it then tests against is that first field.
 const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
 /// How often a fish lighter than the bait's size comes off, against how many
 /// times lighter it is: one half the bait's size comes off a fifth of the time.
@@ -39,6 +46,12 @@ const BAIT_MIN_GRAMS: [f64; 5] = [0.0, 500.0, 3000.0, 7000.0, 20000.0];
 /// `(min - grams) * (1 + shy / 100) / (grams + 0.1) * 20` as a percentage, where
 /// shy is the float we send as 0. So anything under about 85 g on a class 1 bait
 /// comes off every time, and the chance fades out towards the class's floor.
+///
+/// A fish that comes off is a fish you never get to strike: the client answers
+/// the roll by dipping the float instead of calling `klevActivate`, and it is
+/// `klevActivate` that spawns `FishOnRod`. The one rod it spares is the
+/// spinning one, which takes the fish whatever the roll says — no matter here,
+/// since a spinning rod only ever carries a lure and a lure has no floor.
 const DROP_PERCENT: f64 = 20.0;
 /// Cells of a rod's bag holding the rod, reel and line.
 const TACKLE_CELLS: [i32; 3] = [1, 2, 3];
