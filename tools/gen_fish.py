@@ -190,6 +190,16 @@ for name, body in waters[:species_start]:
         if sid in species:
             per_loc.setdefault(loc, set()).add(sid)
 
+# The second guide names a base and its spots under each fish, and sometimes
+# holds a fish the first guide's location lists leave out. Taken only where the
+# two plainly disagree about the same water: "Клевалка от Элиаса" puts голец at
+# five spots of Убежище — Протока, Серебронкс, Затон, Мост, Склон — while the
+# location sections name him at Протока alone.
+FROM_CHART = {20: [1, 2, 4, 6]}
+for sid, spots in FROM_CHART.items():
+    for loc in spots:
+        per_loc.setdefault(loc, set()).add(sid)
+
 # No record survives for these waters, so they are invented: real fish for the
 # region (maps.txt names the Emerald Lake's species), or a neighbouring spot.
 INVENTED = {
