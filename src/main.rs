@@ -3,6 +3,7 @@ mod config;
 mod game;
 mod messages;
 mod photon;
+mod reload;
 mod server;
 mod storage;
 mod web;
@@ -18,7 +19,7 @@ use anyhow::{Context, Result, bail};
 use tokio::net::TcpListener;
 
 use storage::{SqliteStorage, Storage};
-use world::{Log, World};
+use world::{Log, World, Worlds};
 
 const USAGE: &str = "af2-server [--config <dir>] [--db <file>] [--bind <ip>] [--port <n>] [--web-port <n>] [--trace <file>]";
 
@@ -78,15 +79,18 @@ async fn run(options: Options) -> Result<()> {
     let port = options.port.unwrap_or(data.settings.server.port);
     let web_bind = data.settings.server.web_bind.clone();
     let web_port = options.web_port.unwrap_or(data.settings.server.web_port);
-    let world = Arc::new(World::new(
+    let reload_seconds = data.settings.server.reload_seconds;
+    let world = World::new(
         data.settings,
         data.fish,
         data.catalog,
         data.recipes,
-        Box::new(store),
-        Log::new(trace),
-    ));
+        Arc::new(store),
+        Arc::new(Log::new(trace)),
+    );
     world.restore_gather_points(gather_points);
+    let worlds = Arc::new(Worlds::new(world));
+    let world = worlds.current();
 
     let listener = TcpListener::bind((bind.as_str(), port)).await?;
     world.log.line(&format!("listening on {bind}:{port}, saving to {}", db_path.display()));
@@ -94,11 +98,18 @@ async fn run(options: Options) -> Result<()> {
         match TcpListener::bind((web_bind.as_str(), web_port)).await {
             Ok(web) => {
                 world.log.line(&format!("web pages on http://{web_bind}:{web_port}/"));
-                tokio::spawn(web::serve(web, world.clone()));
+                tokio::spawn(web::serve(web, worlds.clone()));
             }
             Err(error) => world.log.line(&format!("web pages: cannot listen on {web_bind}:{web_port}: {error}")),
         }
     }
+
+    tokio::spawn(reload::watch(
+        worlds.clone(),
+        config_dir.clone(),
+        root.clone(),
+        std::time::Duration::from_secs(reload_seconds),
+    ));
 
     let mut next_connection = 0u64;
     loop {
@@ -106,7 +117,7 @@ async fn run(options: Options) -> Result<()> {
             accepted = listener.accept() => {
                 let (stream, remote) = accepted?;
                 next_connection += 1;
-                tokio::spawn(server::run_connection(stream, remote, next_connection, world.clone()));
+                tokio::spawn(server::run_connection(stream, remote, next_connection, worlds.clone()));
             }
             _ = tokio::signal::ctrl_c() => {
                 world.log.line("shutting down");

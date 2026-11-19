@@ -49,7 +49,7 @@ use crate::afc::{self, AfcMessage, AfcWriter};
 use crate::messages as msg;
 use crate::photon;
 use crate::storage::{CaughtFish, CharacterData};
-use crate::world::World;
+use crate::world::{World, Worlds};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -63,11 +63,18 @@ pub struct Conn {
     pub number: u64,
     frames: mpsc::Sender<Vec<u8>>,
     pub world: Arc<World>,
+    worlds: Arc<Worlds>,
 }
 
 impl Conn {
-    pub fn new(number: u64, frames: mpsc::Sender<Vec<u8>>, world: Arc<World>) -> Self {
-        Self { number, frames, world }
+    pub fn new(number: u64, frames: mpsc::Sender<Vec<u8>>, worlds: Arc<Worlds>) -> Self {
+        Self { number, frames, world: worlds.current(), worlds }
+    }
+
+    /// Picks up a reloaded world. Called where a message begins and nowhere
+    /// else, so one message reads one world from start to finish.
+    pub fn refresh(&mut self) {
+        self.world = self.worlds.current();
     }
 
     pub fn log(&self, text: &str) {

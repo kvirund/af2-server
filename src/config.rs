@@ -15,7 +15,7 @@ const BITE_STATES: i32 = 10;
 /// The client keeps bag sizes in an array of 15 and never uses index 0.
 const MAX_BAG_PAGES: i32 = 14;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSettings {
     pub bind: String,
@@ -28,6 +28,16 @@ pub struct ServerSettings {
     /// Shared secret for the admin API on the web port. Empty: no admin API.
     #[serde(default)]
     pub admin_token: String,
+    /// How often to look at `config/` for a file written since, in seconds.
+    /// A change there is read again without a restart; 0 never looks. The
+    /// addresses and the token above are not among what a reload can change,
+    /// since the sockets are already bound by the time anyone edits them.
+    #[serde(default = "reload_seconds")]
+    pub reload_seconds: u64,
+}
+
+fn reload_seconds() -> u64 {
+    3
 }
 
 fn local_address() -> String {

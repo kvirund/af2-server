@@ -17,7 +17,7 @@ use crate::afc::AfcMessage;
 use crate::game::{self, Conn, Outcome, Session};
 use crate::messages;
 use crate::photon::{self, Frame, Params, Value};
-use crate::world::World;
+use crate::world::Worlds;
 
 const EXPECTED_APP: &str = "AFCServer";
 const OUTGOING_QUEUE: usize = 256;
@@ -34,7 +34,7 @@ async fn write_frames(mut socket: OwnedWriteHalf, mut frames: mpsc::Receiver<Vec
     }
 }
 
-pub async fn run_connection(stream: TcpStream, remote: SocketAddr, number: u64, world: Arc<World>) {
+pub async fn run_connection(stream: TcpStream, remote: SocketAddr, number: u64, worlds: Arc<Worlds>) {
     // Small request and reply frames must not wait for each other.
     let _ = stream.set_nodelay(true);
     let (mut reader, writer) = stream.into_split();
@@ -43,7 +43,7 @@ pub async fn run_connection(stream: TcpStream, remote: SocketAddr, number: u64, 
 
     let kick = Arc::new(Notify::new());
     let (admin_sender, mut admin_jobs) = mpsc::channel(ADMIN_QUEUE);
-    let conn = Conn::new(number, sender, world);
+    let conn = Conn::new(number, sender, worlds);
     conn.log(&format!("connected from {remote}"));
 
     let mut session = Session::new(conn, kick.clone(), admin_sender);
@@ -56,6 +56,7 @@ pub async fn run_connection(stream: TcpStream, remote: SocketAddr, number: u64, 
             // A change asked for on the web port. It runs here, between
             // messages, so it owns the character like every other handler.
             Some(job) = admin_jobs.recv() => {
+                session.conn.refresh();
                 game::admin::run(&mut session, job).await;
                 continue;
             }
@@ -91,6 +92,7 @@ async fn handle_frame(
     gaps: &mut BTreeMap<i32, u32>,
     started: Instant,
 ) -> Result<()> {
+    session.conn.refresh();
     game::tick(session).await?;
     match frame {
         Frame::Ping { timestamp } => {

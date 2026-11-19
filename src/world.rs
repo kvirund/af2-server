@@ -154,22 +154,48 @@ pub struct GatherPoint {
     pub respawn_at: i64,
 }
 
+/// Everything the server reads from `config/` and `data/`, and nothing else.
+/// Re-reading those files builds a new `World` around the same live state, so
+/// each of these is replaced whole or not at all.
+///
+/// Everything below them is alive — who is playing, the boards already drawn,
+/// the points already picked — and is held behind an `Arc` for that reason: a
+/// reload hands the new `World` the very same state, never a copy of it.
 pub struct World {
     pub settings: Settings,
     /// Base to its points, filled the first time anyone is at that base.
-    pub gather_points: Mutex<HashMap<i32, BTreeMap<i32, GatherPoint>>>,
+    pub gather_points: Arc<Mutex<HashMap<i32, BTreeMap<i32, GatherPoint>>>>,
     /// Base and tab to its offers, made the first time anyone looks.
-    pub boards: Mutex<HashMap<(i32, i32), BoardOffers>>,
-    next_offer: AtomicI64,
+    pub boards: Arc<Mutex<HashMap<(i32, i32), BoardOffers>>>,
+    next_offer: Arc<AtomicI64>,
     pub fish: FishTable,
     pub catalog: Catalog,
     pub recipes: Vec<Recipe>,
-    pub store: Box<dyn Storage>,
-    pub log: Log,
-    online: OnlineCharacters,
-    live: Mutex<HashMap<i64, LiveCharacter>>,
+    pub store: Arc<dyn Storage>,
+    pub log: Arc<Log>,
+    online: Arc<OnlineCharacters>,
+    live: Arc<Mutex<HashMap<i64, LiveCharacter>>>,
     /// Characters with a letter they have not been told of.
-    mail_notices: Mutex<HashSet<i64>>,
+    mail_notices: Arc<Mutex<HashSet<i64>>>,
+}
+
+/// The world as it stands. A handler takes a pointer out of this when a message
+/// arrives and keeps that one for the whole message, so a reload lands between
+/// messages and never underneath one.
+pub struct Worlds(std::sync::RwLock<Arc<World>>);
+
+impl Worlds {
+    pub fn new(world: World) -> Self {
+        Self(std::sync::RwLock::new(Arc::new(world)))
+    }
+
+    pub fn current(&self) -> Arc<World> {
+        self.0.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    }
+
+    pub fn replace(&self, world: World) {
+        *self.0.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(world);
+    }
 }
 
 impl World {
@@ -178,22 +204,42 @@ impl World {
         fish: FishTable,
         catalog: Catalog,
         recipes: Vec<Recipe>,
-        store: Box<dyn Storage>,
-        log: Log,
+        store: Arc<dyn Storage>,
+        log: Arc<Log>,
     ) -> Self {
         Self {
             settings,
-            gather_points: Mutex::default(),
-            boards: Mutex::default(),
-            next_offer: AtomicI64::new(1),
+            gather_points: Arc::default(),
+            boards: Arc::default(),
+            next_offer: Arc::new(AtomicI64::new(1)),
             fish,
             catalog,
             recipes,
             store,
             log,
-            online: OnlineCharacters::default(),
-            live: Mutex::default(),
-            mail_notices: Mutex::default(),
+            online: Arc::default(),
+            live: Arc::default(),
+            mail_notices: Arc::default(),
+        }
+    }
+
+    /// The same world with the files read again. Everything alive carries over
+    /// untouched, so a player keeps their board offers and the bait in the
+    /// water; only the tables underneath them change.
+    pub fn with_tables(&self, settings: Settings, fish: FishTable, catalog: Catalog, recipes: Vec<Recipe>) -> Self {
+        Self {
+            settings,
+            fish,
+            catalog,
+            recipes,
+            gather_points: self.gather_points.clone(),
+            boards: self.boards.clone(),
+            next_offer: self.next_offer.clone(),
+            store: self.store.clone(),
+            log: self.log.clone(),
+            online: self.online.clone(),
+            live: self.live.clone(),
+            mail_notices: self.mail_notices.clone(),
         }
     }
 

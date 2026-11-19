@@ -23,7 +23,7 @@ use crate::game::advisor::{self, Forecast, Rod, Spot, Tackle};
 use crate::game::fishing;
 use crate::game::{LastCast, death, keepnet};
 use crate::storage::CharacterData;
-use crate::world::World;
+use crate::world::{World, Worlds};
 
 const PAGE: &str = include_str!("web/index.html");
 const MOST_REQUEST_BYTES: usize = 16 * 1024;
@@ -31,12 +31,13 @@ const JSON: &str = "application/json; charset=utf-8";
 /// How long an admin change may take before the asker is told it did not land.
 const ADMIN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-pub async fn serve(listener: TcpListener, world: Arc<World>) {
+pub async fn serve(listener: TcpListener, worlds: Arc<Worlds>) {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
             continue;
         };
-        let world = world.clone();
+        // One request, one world: taken here, kept to the end of the answer.
+        let world = worlds.current();
         tokio::spawn(async move {
             if let Err(error) = answer(stream, &world).await {
                 world.log.line(&format!("web: {error:#}"));
