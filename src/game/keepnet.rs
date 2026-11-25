@@ -163,9 +163,10 @@ pub async fn open_market(session: &mut Session, message: &AfcMessage) -> Result<
     let conn = &session.conn;
     let world = &conn.world;
     let base = travel::current_base(&world.settings, player);
+    // Quiet when this one does not buy: every talk to an NPC comes through here
+    // first, and the one who ends up answering is logged by whoever does.
     let buys = world.settings.fish_market.buyers.get(&base).is_some_and(|npcs| npcs.contains(&shop));
     if !buys {
-        conn.log(&format!("   NPC {shop} at base {base} does not buy fish; its own window is not made yet"));
         return Ok(Outcome::Unanswered);
     }
 

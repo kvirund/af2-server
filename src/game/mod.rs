@@ -268,20 +268,26 @@ pub async fn handle(session: &mut Session, message: &AfcMessage) -> Result<Outco
         msg::FRIDGE => fridge::open(session, message).await,
         msg::FRIDGE_PUT | msg::FRIDGE_TAKE => fridge::transfer(session, message).await,
         // The doctor talks; of the rest only the NPCs listed in fishMarket.buyers
-        // trade fish, and the others' windows are still to do.
-        msg::NPC_TALK => match doctor::talk(session, message).await? {
-            Some(outcome) => Ok(outcome),
-            None => match generator::talk(session, message).await? {
-                Some(outcome) => Ok(outcome),
-                None => match spas::talk(session, message).await? {
-                    Some(outcome) => Ok(outcome),
-                    None => match quests::talk(session, message).await? {
-                        Some(outcome) => Ok(outcome),
-                        None => keepnet::open_market(session, message).await,
+        // trade fish, and the others' windows are still to do. The click names
+        // the NPC by its scene number and nothing else, and that number is not
+        // unique: in Пустошь Лиза and both fish stalls are number 1, in Кулгу
+        // Сашка-торговец and the stall are, so one of the two would always be
+        // out of reach. Both windows go out, the talker's last so it lands on
+        // top of the market.
+        msg::NPC_TALK => {
+            let market = keepnet::open_market(session, message).await?;
+            let talk = match doctor::talk(session, message).await? {
+                Some(outcome) => Some(outcome),
+                None => match generator::talk(session, message).await? {
+                    Some(outcome) => Some(outcome),
+                    None => match spas::talk(session, message).await? {
+                        Some(outcome) => Some(outcome),
+                        None => quests::talk(session, message).await?,
                     },
                 },
-            },
-        },
+            };
+            Ok(talk.unwrap_or(market))
+        }
         msg::DIALOG_ANSWER if generator::is_open(session) => generator::answer(session, message).await,
         msg::DIALOG_ANSWER if spas::is_open(session) => spas::answer(session, message).await,
         msg::DIALOG_ANSWER if quests::is_open(session) => quests::answer(session, message).await,

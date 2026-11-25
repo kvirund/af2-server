@@ -46,7 +46,7 @@ const REFUSED: &str = "no_recept";
 
 /// Recipe and number of uses: the 2nd and 3rd numbers of `basePar`, a negative
 /// count meaning no limit. The tooltip in the client reads them the same way.
-fn taught_by(xml: &str) -> Option<(i32, i32)> {
+pub(super) fn taught_by(xml: &str) -> Option<(i32, i32)> {
     let (_, rest) = xml.split_once("<basePar>")?;
     let mut fields = rest.split('<').next()?.split('/').skip(1);
     Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))

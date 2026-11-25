@@ -742,6 +742,10 @@ pub struct QuestStep {
     /// Another chain that has to be finished first.
     #[serde(default)]
     pub requires: Option<String>,
+    /// What the NPC hands over as he gives the step, not when it is done: the
+    /// bait and the blueprints a step cannot be finished without.
+    #[serde(default)]
+    pub given: QuestReward,
     #[serde(default)]
     pub reward: QuestReward,
 }

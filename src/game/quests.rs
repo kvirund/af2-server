@@ -204,9 +204,12 @@ fn may_begin(settings: &QuestSettings, character: &CharacterData, step: &QuestSt
     })
 }
 
-/// Puts the step's lines in the list.
+/// Puts the step's lines in the list and hands over what the step is given
+/// with. Check `given` fits first: this one cannot be put off to the next page
+/// the way a reward can, because the step is unplayable without it.
 async fn take(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()> {
-    let settings = &conn.world.settings.quests;
+    let world = conn.world.clone();
+    let settings = &world.settings.quests;
     let chain = &settings.chains[chain_index];
     let step = &chain.steps[step_of(&player.data, chain)];
     player.data.quest_values.insert(taken_key(chain), 1);
@@ -223,6 +226,12 @@ async fn take(conn: &Conn, player: &mut Player, chain_index: usize) -> Result<()
         board::send_events(conn, &added.iter().map(|task| (TAKEN, task.id)).collect::<Vec<_>>()).await?;
     }
     conn.log(&format!("   -> 680 quest {} step {}: {} task(s)", chain.name, step_of(&player.data, chain), added.len()));
+    let said = give(conn, player, &step.given).await?;
+    if !said.is_empty() {
+        conn.save(player).await?;
+        chat::system(conn, &format!("Получено: {}.", said.join(", "))).await?;
+        conn.log(&format!("   quest {} step given: {}", chain.name, said.join(", ")));
+    }
     Ok(())
 }
 
@@ -344,6 +353,10 @@ async fn settle(conn: &Conn, player: &mut Player) -> Result<()> {
             }
             let taken = value(&player.data, &taken_key(chain)) > 0;
             if !taken && step.offer.is_none() {
+                if !reward_fits(conn, player, &step.given) {
+                    conn.log(&format!("   quest {}: no room for what the step is given with", chain.name));
+                    continue;
+                }
                 take(conn, player, index).await?;
                 moved = true;
             } else if taken && step.done.is_none() && tasks_done(&player.data, chain, step) {
@@ -613,6 +626,16 @@ pub async fn answer(session: &mut Session, message: &AfcMessage) -> Result<Outco
     let taken = value(&player.data, &taken_key(chain)) > 0;
     match step {
         Some(step) if !taken && step.offer.is_some_and(|offer| offer.answer == answer) => {
+            if !reward_fits(conn, player, &step.given) {
+                match chain.full {
+                    Some(full) => page(conn, player, chain, full).await?,
+                    None => {
+                        chat::system(conn, "В рюкзаке нет места для того, что даёт задание.").await?;
+                        close(conn, player, file).await?;
+                    }
+                }
+                return Ok(Outcome::Answered);
+            }
             take(conn, player, index).await?;
             if step.tasks.is_empty() {
                 show_chain(conn, player, index).await?;
@@ -788,6 +811,64 @@ mod tests {
         let vasil = settings.chains.iter().find(|chain| chain.name == "vasil").unwrap();
         character.quest_values.insert(step_key(vasil), vasil.steps.len() as i32);
         assert_eq!(icon_values(&settings, &character)["q1_vasil"], 2, "nothing left");
+    }
+
+    /// Жека asked for a float to be made and handed out the recipe for it as
+    /// the reward for making it, so the step could not be finished at all
+    /// (ticket #1). Every `make` task is checked against what the character can
+    /// have in hand by then: a recipe open to everyone, one an earlier step
+    /// gave, or one a recipe item from an earlier step teaches. The recipes and
+    /// the items are read out of the player's own copy of the game, which is
+    /// not in the repository, so without it there is nothing to check.
+    #[test]
+    fn nothing_has_to_be_made_before_its_recipe_is_given() {
+        let root = std::path::Path::new(".");
+        if !root.join("data/items.json").is_file() || !root.join("data/recipes.json").is_file() {
+            eprintln!("warning: data/items.json or data/recipes.json missing, so the quest chains went unchecked");
+            return;
+        }
+        let data = crate::config::load(&root.join("config"), root).expect("the game data");
+        for chain in &data.settings.quests.chains {
+            let mut known: std::collections::HashSet<i32> =
+                data.recipes.iter().filter(|recipe| recipe.default).map(|recipe| recipe.id).collect();
+            for (index, step) in chain.steps.iter().enumerate() {
+                for recipe in &step.given.recipes {
+                    known.insert(*recipe);
+                }
+                for [template, _] in &step.given.items {
+                    if let Some(item) = data.catalog.get(*template)
+                        && let Some((recipe, _)) = crafting::taught_by(&item.xml)
+                    {
+                        known.insert(recipe);
+                    }
+                }
+                for spec in step.tasks.iter().filter(|spec| spec.kind == TaskKind::Make) {
+                    let made: Vec<i32> = data
+                        .recipes
+                        .iter()
+                        .filter(|recipe| recipe.result[0] as i32 == spec.item)
+                        .map(|recipe| recipe.id)
+                        .collect();
+                    assert!(!made.is_empty(), "{} step {index}: nothing makes item {}", chain.name, spec.item);
+                    assert!(
+                        made.iter().any(|recipe| known.contains(recipe)),
+                        "{} step {index} asks to make item {}, whose recipes {made:?} no one has yet",
+                        chain.name,
+                        spec.item
+                    );
+                }
+                for recipe in &step.reward.recipes {
+                    known.insert(*recipe);
+                }
+                for [template, _] in &step.reward.items {
+                    if let Some(item) = data.catalog.get(*template)
+                        && let Some((recipe, _)) = crafting::taught_by(&item.xml)
+                    {
+                        known.insert(recipe);
+                    }
+                }
+            }
+        }
     }
 
     fn json_comments_parse(text: &str) -> QuestSettings {
