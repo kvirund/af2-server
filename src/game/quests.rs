@@ -352,6 +352,27 @@ async fn settle(conn: &Conn, player: &mut Player) -> Result<()> {
                 continue;
             }
             let taken = value(&player.data, &taken_key(chain)) > 0;
+            // A character who took the step before `given` existed holds the
+            // task and nothing to do it with, and the offer that hands the
+            // recipes over will not come again. Recipes are kept for good, so
+            // handing a missing one over now cannot give anything twice; the
+            // things are left alone, since those could be.
+            if taken {
+                let missing: Vec<i32> = step
+                    .given
+                    .recipes
+                    .iter()
+                    .copied()
+                    .filter(|recipe| !player.data.known_recipes.contains_key(recipe))
+                    .collect();
+                if !missing.is_empty() {
+                    for recipe in &missing {
+                        crafting::add_uses(&mut player.data.known_recipes, *recipe, -1);
+                    }
+                    conn.save(player).await?;
+                    conn.log(&format!("   quest {}: the step was taken without recipes {missing:?}, given now", chain.name));
+                }
+            }
             if !taken && step.offer.is_none() {
                 if !reward_fits(conn, player, &step.given) {
                     conn.log(&format!("   quest {}: no room for what the step is given with", chain.name));
