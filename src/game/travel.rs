@@ -13,7 +13,7 @@ use crate::messages as msg;
 const ANY_LEVEL: i32 = 1000;
 const OPTION_RECORD_LEN: usize = 12;
 /// Every base lists this location: the base itself.
-const BASE_LOCATION: i32 = 0;
+pub(super) const BASE_LOCATION: i32 = 0;
 
 /// Case 145: the catalogue of bases, read until the payload ends.
 pub async fn send_base_list(conn: &Conn) -> Result<()> {
@@ -79,14 +79,18 @@ pub async fn go(session: &mut Session, message: &AfcMessage) -> Result<Outcome> 
         conn.log(&format!("   -> 21 travel to base {base} cost {cost}"));
     }
 
-    // The client only knows the starting base's locations until told about others.
-    if base != conn.world.settings.character.start_base {
-        send_base_details(conn, base).await?;
-    }
+    // 150 for every arrival, the starting base included. It carries the base's
+    // locations, which the client needs before it loads one, but it also sets
+    // the base the client thinks it is on — and skipping it for the starting
+    // base left the two sides to drift apart: the client fell back to Убежище
+    // on its own map while the server still had the base travelled from, so the
+    // map showed the wrong locations and NPCs answered with another base's
+    // dialog (ticket #4).
+    send_base_details(conn, base).await?;
 
-    player.location = location;
-    player.base = base;
+    moved_to(player, base, location);
     player.shown_points = None;
+    conn.save(player).await?;
 
     let mut w = AfcWriter::new();
     w.int32(point);
@@ -107,9 +111,9 @@ pub async fn teleport(conn: &Conn, player: &mut Player, base: i32, location: i32
         conn.log(&format!("   trip to base {base} location {location}: unknown destination"));
         return Ok(());
     }
-    player.base = base;
-    player.location = location;
+    moved_to(player, base, location);
     player.shown_points = None;
+    conn.save(player).await?;
     send_base_details(conn, base).await?;
     if location == BASE_LOCATION {
         conn.send(msg::LOAD_BASE, Vec::new()).await?;
@@ -143,8 +147,8 @@ pub async fn walk_on(session: &mut Session, message: &AfcMessage) -> Result<Outc
         conn.log(&format!("   walk on to base {base} needs level {}, have {}", info.min_level, player.data.level));
         return Ok(Outcome::Unanswered);
     }
-    player.location = location;
-    player.base = base;
+    moved_to(player, base, location);
+    conn.save(player).await?;
 
     let mut w = AfcWriter::new();
     w.int32(base).int32(location).int32(0).int32(0);
@@ -153,7 +157,18 @@ pub async fn walk_on(session: &mut Session, message: &AfcMessage) -> Result<Outc
     Ok(Outcome::Answered)
 }
 
-/// The base the character is at; a new session starts on the starting base.
+/// Where the character now is, for this session and for the next login: the
+/// base goes into the character so that logging out on Пустоши and coming back
+/// does not land on Убежище. The location is not kept: a character always
+/// comes back standing on the base, never afloat.
+fn moved_to(player: &mut Player, base: i32, location: i32) {
+    player.base = base;
+    player.location = location;
+    player.data.base = base;
+}
+
+/// The base the character is at; one who has been nowhere starts on the
+/// starting base.
 pub(super) fn current_base(settings: &Settings, player: &Player) -> i32 {
     base_at(&settings.bases, settings.character.start_base, player.base, player.location)
 }
@@ -184,9 +199,9 @@ pub async fn return_to_base(session: &mut Session) -> Result<Outcome> {
     // base the character is at has to come from the character. Reaching for the
     // starting base here sent everyone to Убежище from every other base.
     let base = current_base(settings, player);
-    player.location = BASE_LOCATION;
-    player.base = base;
+    moved_to(player, base, BASE_LOCATION);
     player.shown_points = None;
+    conn.save(player).await?;
     send_base_details(conn, base).await?;
     conn.send(msg::LOAD_BASE, Vec::new()).await?;
     conn.log(&format!("   -> 150, 151 back to base {base}"));

@@ -160,10 +160,13 @@ pub(crate) fn keyed(text: &str) -> String {
 impl Player {
     fn new(data: CharacterData) -> Self {
         let now = Instant::now();
+        // Standing on the base the character was left on: a login never puts
+        // anyone afloat, and the location comes from the client's own 138.
+        let base = data.base;
         Self {
             data,
-            location: fishing::DEFAULT_LOCATION,
-            base: 0,
+            location: travel::BASE_LOCATION,
+            base,
             bites_by_rod: HashMap::new(),
             shown_points: None,
             harvesting: None,

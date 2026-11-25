@@ -125,17 +125,33 @@ fn changes(shown: &BTreeMap<i32, i32>, now: &BTreeMap<i32, i32>) -> Vec<(i32, i3
 
 /// Cases 161 and 162: until the end, int point, int resource (the model
 /// `restype_N`), int work points, two triples (a quest task and the profession
-/// that gives a bonus; none here) and a string of perks.
+/// that gives a bonus; none here) and the skills the point asks for, as
+/// `perk/level/0` separated by commas.
+///
+/// The client writes that last string into the sign over the point itself:
+/// «Требуются навыки: <название> ур N», green when the character has the level
+/// and red when not, and «Требований нет» for an empty one — which is all it
+/// could ever say while the server sent nothing, even at a point no one could
+/// harvest (ticket #3). The skill's name is the client's own, looked up by id.
+/// One `perk/level/0` for the skill a resource asks for, empty for a resource
+/// anyone can gather; several would be separated by commas.
+fn skills_asked(info: Option<&GatherResource>) -> String {
+    info.filter(|info| info.skill > 0 && info.skill_level > 0)
+        .map(|info| format!("{}/{}/0", info.skill, info.skill_level))
+        .unwrap_or_default()
+}
+
 async fn send_points(conn: &Conn, id: i32, points: &[(i32, i32)]) -> Result<()> {
     let resources = &conn.world.settings.gathering.resources;
     let mut w = AfcWriter::new();
     for (point, resource) in points {
-        let work = resources.get(resource).map_or(0.0, |info| info.work_points);
+        let info = resources.get(resource);
+        let work = info.map_or(0.0, |info| info.work_points);
         w.int32(*point).int32(*resource).int32(work as i32);
         for _ in 0..6 {
             w.double(0.0);
         }
-        w.string("");
+        w.string(&skills_asked(info));
     }
     conn.send(id, w.finish()).await
 }
@@ -355,6 +371,26 @@ mod tests {
         let shown = BTreeMap::from([(1, 101), (2, 0), (3, 102)]);
         let now = BTreeMap::from([(1, 101), (2, 103), (3, 0)]);
         assert_eq!(changes(&shown, &now), vec![(2, 103), (3, 0)]);
+    }
+
+    /// The sign over a point said «Требований нет» at a point no one without
+    /// the skill could touch, because the server sent no skills at all with it
+    /// (ticket #3).
+    #[test]
+    fn a_point_names_the_skill_it_asks_for() {
+        let info = |skill, skill_level| GatherResource {
+            name: String::new(),
+            work_points: 1.0,
+            seconds: 1.0,
+            skill,
+            skill_level,
+            rolls: 1,
+            drops: Vec::new(),
+        };
+        assert_eq!(skills_asked(Some(&info(145, 2))), "145/2/0");
+        assert_eq!(skills_asked(Some(&info(145, 0))), "");
+        assert_eq!(skills_asked(Some(&info(0, 2))), "");
+        assert_eq!(skills_asked(None), "");
     }
 
     #[test]

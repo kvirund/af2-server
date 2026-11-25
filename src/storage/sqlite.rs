@@ -59,6 +59,7 @@ async fn add_missing_columns(pool: &SqlitePool) -> Result<()> {
     add_column(pool, "characters", "vip_until", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "fish", "traits", "TEXT NOT NULL DEFAULT ''").await?;
     add_column(pool, "characters", "appearance", "BLOB NOT NULL DEFAULT x''").await?;
+    add_column(pool, "characters", "base", "INTEGER NOT NULL DEFAULT 0").await?;
     add_column(pool, "items", "parts", "TEXT NOT NULL DEFAULT ''").await?;
     Ok(())
 }
@@ -225,18 +226,18 @@ impl Storage for SqliteStorage {
     }
 
     async fn list_characters(&self, account: i64) -> Result<Vec<CharacterSummary>> {
-        let rows: Vec<(i64, String, i32, Vec<u8>)> =
-            sqlx::query_as("SELECT id, name, level, appearance FROM characters WHERE account_id = ? ORDER BY id")
+        let rows: Vec<(i64, String, i32, i32, Vec<u8>)> =
+            sqlx::query_as("SELECT id, name, level, base, appearance FROM characters WHERE account_id = ? ORDER BY id")
                 .bind(account)
                 .fetch_all(&self.pool)
                 .await?;
-        Ok(rows.into_iter().map(|(id, name, level, appearance)| CharacterSummary { id, name, level, appearance }).collect())
+        Ok(rows.into_iter().map(|(id, name, level, base, appearance)| CharacterSummary { id, name, level, base, appearance }).collect())
     }
 
     async fn all_characters(&self) -> Result<Vec<CharacterSummary>> {
-        let rows: Vec<(i64, String, i32, Vec<u8>)> =
-            sqlx::query_as("SELECT id, name, level, appearance FROM characters ORDER BY id").fetch_all(&self.pool).await?;
-        Ok(rows.into_iter().map(|(id, name, level, appearance)| CharacterSummary { id, name, level, appearance }).collect())
+        let rows: Vec<(i64, String, i32, i32, Vec<u8>)> =
+            sqlx::query_as("SELECT id, name, level, base, appearance FROM characters ORDER BY id").fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(id, name, level, base, appearance)| CharacterSummary { id, name, level, base, appearance }).collect())
     }
 
     async fn name_taken(&self, name: &str) -> Result<bool> {
@@ -249,7 +250,7 @@ impl Storage for SqliteStorage {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
         let id = sqlx::query(
-            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until, appearance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO characters (account_id, name, level, experience, money, premium, vip, life, stamina, radiation, food, water, work_points, studying, healed_at, vip_until, base, appearance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(character.account)
         .bind(&character.name)
@@ -267,6 +268,7 @@ impl Storage for SqliteStorage {
         .bind(character.studying)
         .bind(character.healed_at)
         .bind(character.vip_until)
+        .bind(character.base)
         .bind(&character.appearance)
         .execute(&mut *transaction)
         .await?
@@ -301,7 +303,7 @@ impl Storage for SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
 
-        let (appearance,): (Vec<u8>,) = sqlx::query_as("SELECT appearance FROM characters WHERE id = ?")
+        let (base, appearance): (i32, Vec<u8>) = sqlx::query_as("SELECT base, appearance FROM characters WHERE id = ?")
             .bind(id)
             .fetch_one(&self.pool)
             .await?;
@@ -406,6 +408,7 @@ impl Storage for SqliteStorage {
             reputation: reputation.into_iter().collect(),
             studying,
             healed_at,
+            base,
             board_tasks: board_tasks
                 .into_iter()
                 .map(|(id, base, category, task, quality, title, species, bait, target, min_grams, max_grams, progress, reward, ends_at, kind)| BoardTask {
@@ -432,7 +435,7 @@ impl Storage for SqliteStorage {
     async fn save_character(&self, character: &CharacterData) -> Result<()> {
         let (life, stamina, radiation, food, water, work_points) = vitals_columns(character);
         let mut transaction = self.pool.begin().await?;
-        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ?, healed_at = ?, vip_until = ? WHERE id = ?")
+        sqlx::query("UPDATE characters SET level = ?, experience = ?, money = ?, premium = ?, vip = ?, life = ?, stamina = ?, radiation = ?, food = ?, water = ?, work_points = ?, studying = ?, healed_at = ?, vip_until = ?, base = ? WHERE id = ?")
             .bind(character.level)
             .bind(character.experience)
             .bind(character.money)
@@ -447,6 +450,7 @@ impl Storage for SqliteStorage {
             .bind(character.studying)
             .bind(character.healed_at)
             .bind(character.vip_until)
+            .bind(character.base)
             .bind(character.id)
             .execute(&mut *transaction)
             .await?;
@@ -658,6 +662,9 @@ mod tests {
         character.skills.insert(100, Skill { level: 2, experience: 150.5 });
         character.studying = 100;
         character.healed_at = 1_700_000_000;
+        // Where the character was left: the next login goes back there instead
+        // of to the starting base (ticket #4).
+        character.base = 3;
         character.quest_values.insert("holod_1".into(), 3);
         character.board_tasks.push(BoardTask { id: 900, base: 1, category: 1000, task: 2, target: 5, reward: "money=100".into(), ..Default::default() });
         character.reputation.insert(1, 450);

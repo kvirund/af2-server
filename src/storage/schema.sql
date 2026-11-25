@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS characters (
     studying INTEGER NOT NULL DEFAULT 0,
     healed_at INTEGER NOT NULL DEFAULT 0,
     vip_until INTEGER NOT NULL DEFAULT 0,
+    base INTEGER NOT NULL DEFAULT 0,
     appearance BLOB NOT NULL DEFAULT x''
 );
 

@@ -24,10 +24,15 @@ pub(super) fn level_allows(settings: &ShopSettings, level: i32, item: &CatalogIt
     !settings.enforce_levels || minimal_level(&item.xml) <= level
 }
 
+/// The faction and level an item is sold from (`reputation` in shops.json).
+fn reputation_needed(shop: &ShopSettings, item: &CatalogItem) -> Option<[i32; 2]> {
+    shop.stock.reputation.get(&item.id).copied()
+}
+
 /// The faction and level an item is sold from (`reputation` in shops.json),
 /// if the character is not there yet.
 fn reputation_short(shop: &ShopSettings, factions: &ReputationSettings, character: &CharacterData, item: &CatalogItem) -> Option<[i32; 2]> {
-    let [faction, level] = *shop.stock.reputation.get(&item.id)?;
+    let [faction, level] = reputation_needed(shop, item)?;
     (reputation::level_with(factions, character, faction) < level).then_some([faction, level])
 }
 
@@ -119,7 +124,14 @@ pub async fn list(session: &mut Session, message: &AfcMessage) -> Result<Outcome
     for item in &listed {
         let allowed = level_allows(&settings.shop, level, item) && reputation_short(&settings.shop, &settings.reputation, &player.data, item).is_none();
         w.int32(item.id).string(&price_text(&settings.shop, item));
-        w.double(0.0).double(0.0).double(0.0).boolean(allowed);
+        // The triple is the reputation the goods ask for: faction and level.
+        // The client draws it under the description as the faction's name and
+        // the name of that rank, from its own table, red when the row is not
+        // allowed — and with zeros here it said nothing at all about why a row
+        // was greyed out (ticket #3). The requirement goes out whether or not
+        // the character has it; the colour is what the flag below decides.
+        let [faction, rank] = reputation_needed(&settings.shop, item).unwrap_or([0, 0]);
+        w.double(f64::from(faction)).double(f64::from(rank)).double(0.0).boolean(allowed);
     }
     conn.send(msg::SHOP_LIST, w.finish()).await?;
     conn.log(&format!("   -> 1300 shop {shop}: {} items, {} categories", listed.len(), categories.len()));

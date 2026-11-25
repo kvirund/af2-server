@@ -134,6 +134,9 @@ pub struct CharacterData {
     pub studying: i32,
     /// When the doctor last healed the character, Unix seconds; 0 for never.
     pub healed_at: i64,
+    /// The base the character was last at, to come back to on the next login;
+    /// 0 for a character who has not been anywhere yet.
+    pub base: i32,
     /// VIP for good, set by hand in the database: the bought patent is `vip_until`.
     pub vip: bool,
     /// When the bought VIP patent ends, Unix seconds; 0 for never bought.
@@ -185,6 +188,8 @@ pub struct CharacterSummary {
     pub id: i64,
     pub name: String,
     pub level: i32,
+    /// The base to show the character on, 0 for one who has been nowhere.
+    pub base: i32,
     pub appearance: Vec<u8>,
 }
 

@@ -108,7 +108,10 @@ async fn send_list(session: &mut Session) -> Result<Outcome> {
     for character in &characters {
         w.int64(character.id).string(&character.name).int32(character.level);
         w.int32(0); // short costume id
-        w.int32(start_base).int32(0); // base, location: 0 is standing on the base
+        // Where this one was left, not where everyone starts; location 0 is
+        // standing on the base, which is where a character always comes back.
+        let base = if character.base > 0 { character.base } else { start_base };
+        w.int32(base).int32(0);
         w.int64(0);
         let appearance = appearance_of(&character.appearance);
         w.int32(appearance.len() as i32).bytes(appearance);
@@ -245,9 +248,11 @@ pub async fn go_to_game(session: &mut Session, message: &AfcMessage) -> Result<O
         ));
     }
 
-    let start_base = world.settings.character.start_base;
+    // 150 also sets the base the client thinks it is on, so this is the base
+    // the character was left on, not the one everyone starts at.
+    let base = travel::current_base(&world.settings, player);
     travel::send_base_list(&session.conn).await?;
-    travel::send_base_details(&session.conn, start_base).await?;
+    travel::send_base_details(&session.conn, base).await?;
     send_details(&session.conn, player, msg::CHARACTER_DETAILS).await?;
     if vip::active(&player.data) {
         vip::send_icon(&session.conn, &player.data).await?;
@@ -277,7 +282,7 @@ async fn send_details(conn: &Conn, player: &Player, message_id: i32) -> Result<(
     w.int64(character.experience).int64(progression.experience_needed(character.level, perks::effects(conn, player).level_cost));
     w.int64(character.money).int64(character.premium);
     w.string("");
-    w.int32(settings.character.start_base).int32(0); // base, location
+    w.int32(travel::current_base(settings, player)).int32(0); // base, location
     w.int32(titles::shown(character)).int64(0);
 
     // An int the client reads and never uses, then each scale as float value,

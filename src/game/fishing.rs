@@ -20,8 +20,6 @@ use crate::world::World;
 use crate::messages as msg;
 use crate::storage::{CaughtFish, ItemEntry, Record, UNKNOWN_BAIT};
 
-pub const DEFAULT_LOCATION: i32 = 4;
-
 pub const TROPHY_CLASS: i32 = 2;
 pub const LARGE_CLASS: i32 = 1;
 
