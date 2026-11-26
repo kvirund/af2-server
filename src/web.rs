@@ -2,9 +2,11 @@
 //! access to them can be limited apart from the game's: who is in play, every
 //! character, and a fishing advisor that works the odds out the game's way.
 //!
-//! Plain HTTP/1.1, GET only, one request per connection: `/` is the page,
-//! `/api/online`, `/api/characters`, `/api/world` (bases, fish, baits, the
-//! game's clock) and `/api/advisor` are its JSON. The advisor takes
+//! Plain HTTP/1.1, one request per connection: `/` is the page, and the JSON is
+//! `/api/online`, `/api/characters`, `/api/character?id=<n>` (one character in
+//! full, for the editor), `/api/world` (bases, fish, baits, factions, the
+//! game's clock), `/api/items` (the whole catalogue, for the editor's picker)
+//! and `/api/advisor`. `POST /api/admin/do` changes a character. The advisor takes
 //! `character`, `base` (a number or `all`), `time` (`day`, `night`, `both`),
 //! `scope` (`mine`, `shop`, `all`), `tackle` (a rod's bag or `none`), `bait`,
 //! `species`, `goal` (`money`, `experience`, `bites`, `trophies`), `bottom`
@@ -38,15 +40,16 @@ pub async fn serve(listener: TcpListener, worlds: Arc<Worlds>) {
         };
         // One request, one world: taken here, kept to the end of the answer.
         let world = worlds.current();
+        let worlds = worlds.clone();
         tokio::spawn(async move {
-            if let Err(error) = answer(stream, &world).await {
+            if let Err(error) = answer(stream, &world, worlds).await {
                 world.log.line(&format!("web: {error:#}"));
             }
         });
     }
 }
 
-async fn answer(mut stream: TcpStream, world: &World) -> Result<()> {
+async fn answer(mut stream: TcpStream, world: &World, worlds: Arc<Worlds>) -> Result<()> {
     let mut request = Vec::new();
     let mut chunk = [0u8; 4096];
     while !request.windows(4).any(|end| end == b"\r\n\r\n") && request.len() < MOST_REQUEST_BYTES {
@@ -73,7 +76,7 @@ async fn answer(mut stream: TcpStream, world: &World) -> Result<()> {
     let mut words = whole.lines().next().unwrap_or("").split(' ');
     let (status, kind, body) = match (words.next(), words.next()) {
         (Some("GET"), Some(target)) => route(world, target).await,
-        (Some("POST"), Some(target)) => post(world, target, &whole, &body_text).await,
+        (Some("POST"), Some(target)) => post(world, worlds, target, &whole, &body_text).await,
         _ => ("405 Method Not Allowed", "text/plain; charset=utf-8", "GET or POST".to_string()),
     };
     let reply = format!(
@@ -110,7 +113,7 @@ fn admin_token(world: &World) -> String {
 /// in a browser from sending these behind the player's back: localhost is no
 /// wall, any site can POST to it. An empty `server.adminToken` turns the whole
 /// thing off, which is how it ships.
-async fn post(world: &World, target: &str, request: &str, body: &str) -> (&'static str, &'static str, String) {
+async fn post(world: &World, worlds: Arc<Worlds>, target: &str, request: &str, body: &str) -> (&'static str, &'static str, String) {
     let plain = "text/plain; charset=utf-8";
     let wanted = admin_token(world);
     let wanted = wanted.trim();
@@ -119,17 +122,17 @@ async fn post(world: &World, target: &str, request: &str, body: &str) -> (&'stat
     }
     if header(request, "x-admin-token") != Some(wanted) {
         world.log.line(&format!("web: admin request to {target} without the token"));
-        return ("403 Forbidden", plain, "нужен заголовок X-Admin-Token".into());
+        return ("403 Forbidden", plain, "нужен верный заголовок X-Admin-Token".into());
     }
     let (path, args) = query(target);
     match path {
-        "/api/admin/do" => admin_do(world, &args, body).await,
+        "/api/admin/do" => admin_do(world, worlds, &args, body).await,
         _ => ("404 Not Found", plain, "not found".into()),
     }
 }
 
 /// Hands one change to the connection playing the character and waits for it.
-async fn admin_do(world: &World, args: &HashMap<&str, &str>, body: &str) -> (&'static str, &'static str, String) {
+async fn admin_do(world: &World, worlds: Arc<Worlds>, args: &HashMap<&str, &str>, body: &str) -> (&'static str, &'static str, String) {
     let plain = "text/plain; charset=utf-8";
     let Some(character) = args.get("character").and_then(|value| value.parse::<i64>().ok()) else {
         return ("400 Bad Request", plain, "нужен ?character=<id>".into());
@@ -138,13 +141,14 @@ async fn admin_do(world: &World, args: &HashMap<&str, &str>, body: &str) -> (&'s
         Ok(action) => action,
         Err(error) => return ("400 Bad Request", plain, format!("тело запроса: {error}")),
     };
+    // Nobody playing them: the change is made on the save itself, which is
+    // safe exactly while no connection owns it.
     let Some(channel) = world.admin_channel(character) else {
-        let online = world.online_characters();
-        return (
-            "409 Conflict",
-            plain,
-            format!("персонаж {character} не в игре, менять его некому; сейчас играют: {online:?}"),
-        );
+        return match crate::game::admin::offline(worlds, character, &action).await {
+            Ok(Ok(said)) => ("200 OK", plain, said),
+            Ok(Err(refused)) => ("422 Unprocessable Entity", plain, refused),
+            Err(error) => ("500 Internal Server Error", plain, format!("{error:#}")),
+        };
     };
     let (answer, wait) = tokio::sync::oneshot::channel();
     let job = crate::world::AdminJob { action, answer };
@@ -174,6 +178,15 @@ async fn route(world: &World, target: &str) -> (&'static str, &'static str, Stri
         "/" | "/index.html" => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
         "/api/online" => json(serde_json::to_string(&online(world)).map_err(Into::into)),
         "/api/characters" => json(characters(world).await),
+        "/api/character" => match args.get("id").and_then(|value| value.parse::<i64>().ok()) {
+            None => ("400 Bad Request", "text/plain; charset=utf-8", "нужен ?id=<персонаж>".to_string()),
+            Some(id) => match character(world, id).await {
+                Ok(Some(body)) => ("200 OK", JSON, body),
+                Ok(None) => ("404 Not Found", "text/plain; charset=utf-8", format!("персонажа {id} нет")),
+                Err(error) => ("500 Internal Server Error", "text/plain; charset=utf-8", format!("{error:#}")),
+            },
+        },
+        "/api/items" => json(serde_json::to_string(&items(world)).map_err(Into::into)),
         "/api/world" => json(serde_json::to_string(&reference(world)).map_err(Into::into)),
         "/api/advisor" => json(advise(world, advice_query(&args)).await),
         _ => ("404 Not Found", "text/plain; charset=utf-8", "not found".into()),
@@ -375,10 +388,197 @@ struct Reference {
     bases: Vec<BaseRef>,
     species: Vec<SpeciesRef>,
     baits: Vec<BaitRef>,
+    factions: Vec<FactionRef>,
     clock: Clock,
     bite_request_seconds: f64,
     near_bottom_cm: f64,
     default_bottom_cm: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FactionRef {
+    id: i32,
+    name: String,
+    /// How many level names the client has for it, counting level 0.
+    levels: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ItemRef {
+    id: i32,
+    name: String,
+    kind: i32,
+    stacks: bool,
+    /// Pieces that fit in one cell.
+    max_count: i32,
+    /// Credits for one purchase, 0 for an item no shop sells for credits.
+    price: f64,
+}
+
+/// The whole catalogue, so the editor can pick an item by name instead of by
+/// number. It is the client's own table, a few hundred rows, so it goes whole.
+fn items(world: &World) -> Vec<ItemRef> {
+    let mut rows: Vec<ItemRef> = world
+        .catalog
+        .all()
+        .map(|item| ItemRef {
+            id: item.id,
+            name: item_name(world, item.id),
+            kind: item.kind,
+            stacks: item.stacks,
+            max_count: item.max_count,
+            price: item.cost as f64 / 100.0,
+        })
+        .collect();
+    rows.sort_by(|a, b| a.name.cmp(&b.name));
+    rows
+}
+
+/// The board tabs, as the client names them.
+fn tab_name(category: i32) -> String {
+    match category {
+        1000 => "Доход".into(),
+        1010 => "Ресурсы".into(),
+        1020 => "Опыт и реп.".into(),
+        1100 => "Ежедневные".into(),
+        other => format!("таб {other}"),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReputationRow {
+    faction: i32,
+    name: String,
+    points: i64,
+    level: i32,
+    /// Points the next level asks for, 0 at the last one.
+    needed: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskRow {
+    id: i64,
+    base_name: String,
+    tab_name: String,
+    quality: i32,
+    /// What the line is about, named: a fish species or an item.
+    about: String,
+    target: i32,
+    progress: i32,
+    /// The client's own reward line, as the board wrote it.
+    reward: String,
+    ends_at: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CharacterDetail {
+    id: i64,
+    name: String,
+    level: i32,
+    experience: i64,
+    /// Experience this level asks for, the character's own perks counted in.
+    needed: i64,
+    money: f64,
+    premium: i64,
+    vip: bool,
+    online: bool,
+    base_name: String,
+    location_name: String,
+    played_seconds: i64,
+    keepnet: usize,
+    records: usize,
+    recipes: usize,
+    /// Experience each level asks for, from the first to the last, with this
+    /// character's own perks counted in: the page sets a level by it.
+    ladder: Vec<i64>,
+    reputation: Vec<ReputationRow>,
+    tasks: Vec<TaskRow>,
+}
+
+/// One character in full, for the editor: what it shows before a change, and
+/// the ids a change needs — the factions and the tasks on the board.
+async fn character(world: &World, id: i64) -> Result<Option<String>> {
+    let live = world.live_one(id);
+    let data = match &live {
+        Some(live) => Some(live.data.clone()),
+        None => world.store.load_character(id).await?,
+    };
+    let Some(data) = data else {
+        return Ok(None);
+    };
+    let settings = &world.settings;
+    let cost = crate::game::perks::effects_for(settings, &world.catalog, &data).level_cost;
+    let reputation = settings
+        .reputation
+        .factions
+        .iter()
+        .map(|(id, faction)| {
+            let points = data.reputation.get(id).copied().unwrap_or(0);
+            let (level, _) = crate::game::reputation::level_of(faction, points);
+            ReputationRow {
+                faction: *id,
+                name: faction.name.clone(),
+                points,
+                level,
+                needed: if level + 1 < faction.levels { crate::game::reputation::needed(faction, level + 1) } else { 0 },
+            }
+        })
+        .collect();
+    let tasks = data
+        .board_tasks
+        .iter()
+        .map(|task| TaskRow {
+            id: task.id,
+            base_name: base_name(world, task.base),
+            tab_name: tab_name(task.category),
+            quality: task.quality,
+            about: about_task(world, task),
+            target: task.target,
+            progress: task.progress,
+            reward: task.reward.clone(),
+            ends_at: task.ends_at,
+        })
+        .collect();
+    let detail = CharacterDetail {
+        id: data.id,
+        name: data.name.clone(),
+        level: data.level,
+        experience: data.experience,
+        needed: settings.progression.experience_needed(data.level, cost),
+        money: data.money as f64 / 100.0,
+        premium: data.premium,
+        vip: data.vip,
+        online: live.is_some(),
+        // A character who has been nowhere yet, or was saved before the base
+        // was kept, stands where everyone starts.
+        base_name: base_name(world, live.as_ref().map_or_else(|| if data.base > 0 { data.base } else { settings.character.start_base }, |live| live.base)),
+        location_name: location_name(world, live.as_ref().map_or(0, |live| live.location)),
+        played_seconds: played(&data),
+        keepnet: data.fish.iter().filter(|fish| keepnet::in_keepnet(fish)).count(),
+        records: data.records.len(),
+        recipes: data.known_recipes.len(),
+        ladder: (1..=settings.progression.max_level).map(|level| settings.progression.experience_needed(level, cost)).collect(),
+        reputation,
+        tasks,
+    };
+    Ok(Some(serde_json::to_string(&detail)?))
+}
+
+/// What a board task is about: an item for the tasks that ask for one, else the
+/// species, or any fish when it names none.
+fn about_task(world: &World, task: &crate::storage::BoardTask) -> String {
+    if task.kind == 4 || task.kind == 5 {
+        return item_name(world, task.species);
+    }
+    if task.species == 0 {
+        return "любая рыба".into();
+    }
+    world.fish.get(task.species).map_or_else(|| format!("вид {}", task.species), |one| one.name.clone())
 }
 
 fn clock(world: &World) -> Clock {
@@ -465,9 +665,16 @@ fn reference(world: &World) -> Reference {
         })
         .collect();
     baits.sort_by(|a, b| a.name.cmp(&b.name));
+    let factions = settings
+        .reputation
+        .factions
+        .iter()
+        .map(|(id, faction)| FactionRef { id: *id, name: faction.name.clone(), levels: faction.levels })
+        .collect();
     Reference {
         bases,
         species,
+        factions,
         baits,
         clock: clock(world),
         bite_request_seconds: advisor::BITE_REQUEST_SECONDS,

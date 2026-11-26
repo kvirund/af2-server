@@ -94,6 +94,19 @@ main { min-width: 0; padding: 24px 32px 48px; max-width: 1240px; }
 .search input:focus, .pick:focus, .num-input:focus { outline: 2px solid var(--accent-line); outline-offset: 0; border-color: var(--accent); }
 .search .i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink-3); width: 16px; height: 16px; }
 .num-input { width: 64px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--surface); text-align: right; }
+.btn { border: 1px solid var(--line-2); background: var(--surface); border-radius: 9px; padding: 6px 12px; cursor: pointer; font-size: 13px; white-space: nowrap; }
+.btn:hover { border-color: var(--accent-line); color: var(--accent); }
+.btn.go { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.go:hover { color: var(--accent-ink); filter: brightness(1.06); }
+.token { width: 150px; text-align: left; }
+.edit { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.edit h3 { margin: 0; font-size: 14px; }
+.edit p { margin: 0; font-size: 12px; color: var(--ink-3); }
+.edit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.edit-row .num-input { width: 104px; }
+.edit-row .wide { width: 100%; max-width: 240px; text-align: left; }
+.said { margin: 0 0 20px; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; background: var(--accent-soft); color: var(--accent); }
+.said.bad { background: var(--bad-soft); color: var(--bad); }
 
 /* Cards */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -325,6 +338,7 @@ const ICON = {
   warn: '<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/>',
   bag: '<path d="M5 8h14l-1 12H6z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
   shop: '<path d="M4 9h16l-1-5H5z"/><path d="M5 9v11h14V9M9 20v-6h6v6"/>',
+  wrench: '<path d="M14.5 6.5a3.5 3.5 0 1 0 4 4L21 13l-3 3-2.5-2.5-6 6a2.5 2.5 0 0 1-3.5-3.5l6-6L9.5 7.5l3-3z"/>',
 };
 const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24">${ICON[name]}</svg>`;
 
@@ -336,6 +350,7 @@ const VIEWS = [
   { id: 'fish', title: 'Рыбы', icon: 'fish', hint: 'Выбери рыбу — покажу, где она живёт и на что её ловить.' },
   { id: 'tackle', title: 'Снасти', icon: 'rod', hint: 'Собранные удочки персонажа, что они выдерживают и где с ними лучше всего.' },
   { id: 'players', title: 'Игроки', icon: 'people', hint: 'Кто сейчас в игре и все персонажи сервера.' },
+  { id: 'edit', title: 'Правка', icon: 'wrench', hint: 'Поставить уровень, деньги, эрги и репутацию, выдать предмет, закрыть задание с доски.' },
 ];
 const GOALS = [
   { id: 'money', title: 'Деньги', icon: 'coin', unit: 'кр./ч' },
@@ -349,6 +364,7 @@ const state = {
   who: store.get('who', ''), base: store.get('base', 'here'), time: store.get('time', 'now'), scope: store.get('scope', 'shop'),
   tackle: store.get('tackle', 'auto'), goal: store.get('goal', 'money'), fight: store.get('fight', 20), bottom: store.get('bottom', 200),
   size: store.get('size', 'any'),
+  edit: store.get('edit', ''), token: store.get('token', ''), items: null, said: null, now: null,
   query: '', theme: store.get('theme', 'auto'),
 };
 const cache = new Map();
@@ -825,6 +841,122 @@ async function viewPlayers(box) {
     </tbody></table></div>`;
 }
 
+/* Editor: the admin API with the names filled in. The GETs need no token; a
+   change does, and it goes to the character the same way the game would. */
+const itemByName = new Map();
+function indexItems() {
+  itemByName.clear();
+  for (const item of state.items ?? []) itemByName.set(item.name.toLowerCase(), item);
+}
+const amount = (id) => Number($(id)?.value ?? 0) || 0;
+/* All the experience behind a level and a place inside it. The API adds and
+   takes away; the page shows what the character is to have and sends the
+   difference. */
+const totalExperience = (level, inside) =>
+  (state.now?.ladder ?? []).slice(0, Math.max(0, level - 1)).reduce((sum, need) => sum + need, 0) + inside;
+/* The item typed in: by its name from the list, or by its number. */
+function chosenItem() {
+  const typed = ($('item-name')?.value ?? '').trim();
+  if (!typed) return null;
+  const named = itemByName.get(typed.toLowerCase());
+  if (named) return named;
+  const id = Number(typed);
+  return Number.isInteger(id) && id > 0 ? state.items.find((one) => one.id === id) ?? { id, name: `предмет ${id}` } : null;
+}
+function says(text, bad = false) { state.said = { text, bad }; render(); }
+
+async function admin(action) {
+  if (!state.token) {
+    says('Нужен токен: «adminToken» в config/settings.json или переменная AF2_ADMIN_TOKEN, заданные до запуска сервера.', true);
+    return;
+  }
+  const box = $('said');
+  if (box) { box.className = 'said'; box.textContent = 'Отправляю…'; }
+  try {
+    const reply = await fetch(`/api/admin/do?character=${encodeURIComponent(state.edit)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': state.token },
+      body: JSON.stringify(action),
+    });
+    const text = (await reply.text()).trim();
+    says(text || `сервер ответил ${reply.status}`, !reply.ok);
+  } catch (error) {
+    says(error.message, true);
+  }
+}
+
+async function viewEdit(box) {
+  setHeader('Правка', VIEWS[5].hint);
+  const options = ['<option value="">— выбери —</option>'].concat(state.characters.map((one) =>
+    `<option value="${one.id}" ${String(one.id) === String(state.edit) ? 'selected' : ''}>${esc(one.name)} · ур. ${one.level}${one.online ? ' · в игре' : ''}</option>`)).join('');
+  $('filters').innerHTML = `<div class="filters">
+    <div class="filter"><span>Персонаж</span><select class="pick" data-pick="edit">${options}</select></div>
+    <div class="filter"><span>Токен</span><input id="token" class="num-input token" type="password" placeholder="X-Admin-Token" value="${esc(state.token)}" autocomplete="off" spellcheck="false"></div>
+  </div>`;
+  if (!state.edit) {
+    box.innerHTML = empty('Кого правим?', 'Выбери персонажа. Тому, кто в игре, всё уходит в клиент сразу; тому, кто не в игре, — прямо в сохранение.');
+    return;
+  }
+  if (!state.items) { state.items = await get('/api/items'); indexItems(); }
+  const one = await get(`/api/character?id=${encodeURIComponent(state.edit)}`);
+  const said = state.said ? `<div id="said" class="said ${state.said.bad ? 'bad' : ''}">${esc(state.said.text)}</div>` : '';
+  const toLevel = Math.max(0, one.needed - one.experience);
+  const list = state.items.map((item) => `<option value="${esc(item.name)}">`).join('');
+  const factions = one.reputation.map((row) =>
+    `<option value="${row.faction}" data-points="${row.points}">${esc(row.name || `фракция ${row.faction}`)}</option>`).join('');
+
+  state.now = one;
+  box.innerHTML = `${said}
+  <div class="card facts">
+    <div class="fact"><span>Уровень</span><b>${one.level}</b><small>${n0.format(one.experience)} / ${n0.format(one.needed)} опыта</small></div>
+    <div class="fact"><span>Деньги</span><b>${money(one.money)}</b><small>эрги: ${n0.format(one.premium)}</small></div>
+    <div class="fact"><span>Где</span><b>${esc(one.baseName)}</b><small>${esc(one.locationName)}${one.online ? ' · в игре' : ''}</small></div>
+    <div class="fact"><span>В игре всего</span><b>${duration(one.playedSeconds)}</b><small>${one.vip ? 'VIP' : 'без VIP'}</small></div>
+    <div class="fact"><span>В садке</span><b>${one.keepnet}</b><small>рекордов: ${one.records} · рецептов: ${one.recipes}</small></div>
+  </div>
+  <div class="section-title"><h2>Изменить</h2><span>${one.online ? 'персонаж в игре: изменения видно сразу' : 'персонажа нет в игре: правится сохранение'}</span></div>
+  <div class="grid">
+    <div class="card edit"><h3>Уровень и опыт</h3>
+      <div class="edit-row"><input id="set-level" class="num-input" type="number" min="1" max="${one.ladder.length}" step="1" value="${one.level}">
+        <input id="set-exp" class="num-input" type="number" min="0" step="100" value="${one.experience}">
+        <button class="btn go" data-admin="level">Установить</button></div>
+      <p>Уровень и опыт внутри него: до ${one.level + 1} уровня осталось ${n0.format(toLevel)}. Разница приходит как опыт за рыбу, с уровнями и долей в навык на изучении; уровень ниже нынешнего снимает их обратно.</p>
+    </div>
+    <div class="card edit"><h3>Деньги</h3>
+      <div class="edit-row"><input id="set-money" class="num-input" type="number" min="0" step="100" value="${one.money}">
+        <button class="btn go" data-admin="money">Установить</button></div>
+      <p>В кредитах, столько станет у персонажа.</p>
+    </div>
+    <div class="card edit"><h3>Эрги</h3>
+      <div class="edit-row"><input id="set-premium" class="num-input" type="number" min="0" step="10" value="${one.premium}">
+        <button class="btn go" data-admin="premium">Установить</button></div>
+      <p>Столько станет у персонажа.</p>
+    </div>
+    <div class="card edit"><h3>Репутация</h3>
+      <div class="edit-row"><select id="rep-faction" class="pick">${factions}</select></div>
+      <div class="edit-row"><input id="set-rep" class="num-input" type="number" min="0" step="50" value="${one.reputation[0]?.points ?? 0}">
+        <button class="btn go" data-admin="reputation">Установить</button></div>
+      <p>Очки выбранной фракции; уровень пересчитается сам.</p>
+    </div>
+    <div class="card edit"><h3>Выдать предмет</h3>
+      <div class="edit-row"><input id="item-name" class="num-input wide" list="item-list" placeholder="Название или номер" autocomplete="off" spellcheck="false"></div>
+      <div class="edit-row"><input id="item-count" class="num-input" type="number" min="1" step="1" value="1">
+        <button class="btn go" data-admin="give">Выдать</button></div>
+      <p>Кладётся в сумки, как покупка: что не поместилось, не выдаётся. Это прибавка, а не «столько станет».</p>
+      <datalist id="item-list">${list}</datalist>
+    </div>
+  </div>
+  <div class="section-title"><h2>Репутация</h2><span>${one.reputation.filter((row) => row.points > 0).length} из ${one.reputation.length} начато</span></div>
+  <div class="card table-card"><table><thead><tr><th>Фракция</th><th class="r">Уровень</th><th class="r">Очки</th><th class="r">До следующего</th></tr></thead><tbody>
+    ${one.reputation.map((row) => `<tr><td>${esc(row.name || `фракция ${row.faction}`)}</td><td class="r">${row.level}</td><td class="r">${n0.format(row.points)}</td><td class="r">${row.needed ? n0.format(row.needed) : '—'}</td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="section-title"><h2>Задания с доски</h2><span>${one.tasks.length ? one.tasks.length : ''}</span></div>
+  ${one.tasks.length ? `<div class="card table-card"><table><thead><tr><th>Задание</th><th>База</th><th>Доска</th><th class="r">Прогресс</th><th>Награда</th><th></th></tr></thead><tbody>
+    ${one.tasks.map((row) => `<tr><td>${esc(row.about)}</td><td>${esc(row.baseName)}</td><td>${esc(row.tabName)}</td><td class="r">${n0.format(row.progress)} / ${n0.format(row.target)}</td><td class="muted">${esc(row.reward)}</td>
+      <td><div class="edit-row"><button class="btn" data-admin="finish" data-task="${row.id}">Засчитать</button><button class="btn" data-admin="drop" data-task="${row.id}">Снять</button></div></td></tr>`).join('')}
+  </tbody></table></div>` : empty('Заданий нет', 'Взятые с доски задания появятся здесь.')}`;
+}
+
 /* Routing */
 function route() {
   const [view = '', id] = location.hash.replace(/^#\/?/, '').split('/');
@@ -844,6 +976,7 @@ async function render() {
     else if (view === 'fish') await viewFishList(box);
     else if (view === 'tackle') await viewTackle(box);
     else if (view === 'players') await viewPlayers(box);
+    else if (view === 'edit') await viewEdit(box);
     else { location.hash = '#/'; return; }
   } catch (error) {
     if (mine === drawing) box.innerHTML = empty('Не получилось', error.message);
@@ -853,6 +986,39 @@ async function render() {
 
 /* Events */
 document.addEventListener('click', (event) => {
+  const act = event.target.closest('[data-admin]');
+  if (act) {
+    const kind = act.dataset.admin;
+    if (kind === 'level') {
+      const level = Math.min(Math.max(1, amount('set-level')), state.now.ladder.length);
+      const inside = Math.max(0, amount('set-exp'));
+      const change = totalExperience(level, inside) - totalExperience(state.now.level, state.now.experience);
+      if (change) admin({ do: 'experience', amount: change });
+      else says('Уровень и опыт уже такие.');
+    } else if (kind === 'money') {
+      const change = Math.round(amount('set-money') * 100) - Math.round(state.now.money * 100);
+      if (change) admin({ do: 'money', amount: change });
+      else says('Денег уже столько.');
+    } else if (kind === 'premium') {
+      const change = amount('set-premium') - state.now.premium;
+      if (change) admin({ do: 'premium', amount: change });
+      else says('Эргов уже столько.');
+    } else if (kind === 'reputation') {
+      const faction = Number($('rep-faction').value);
+      const row = state.now.reputation.find((one) => one.faction === faction);
+      const change = amount('set-rep') - (row?.points ?? 0);
+      if (change) admin({ do: 'reputation', faction, points: change });
+      else says('Очков уже столько.');
+    }
+    else if (kind === 'finish') admin({ do: 'finish_task', task: Number(act.dataset.task) });
+    else if (kind === 'drop') admin({ do: 'drop_task', task: Number(act.dataset.task) });
+    else if (kind === 'give') {
+      const item = chosenItem();
+      if (item) admin({ do: 'give', template: item.id, count: Math.max(1, amount('item-count')) });
+      else says('Не узнаю предмет: впиши название из списка или его номер.', true);
+    }
+    return;
+  }
   const set = event.target.closest('[data-set]');
   if (set) {
     state[set.dataset.set] = set.dataset.value;
@@ -868,12 +1034,18 @@ document.addEventListener('click', (event) => {
   if (row && !event.target.closest('a, button, input')) row.classList.toggle('open');
 });
 document.addEventListener('change', (event) => {
+  if (event.target.id === 'rep-faction') {
+    const points = event.target.selectedOptions[0]?.dataset.points;
+    if (points !== undefined && $('set-rep')) $('set-rep').value = points;
+    return;
+  }
   if (event.target.id === 'who-pick') {
     state.who = event.target.value; store.set('who', state.who); advice = null; cache.clear(); render(); return;
   }
   const pick = event.target.closest('[data-pick]');
   if (pick) {
     const key = pick.dataset.pick;
+    if (key === 'edit') state.said = null;
     state[key] = key === 'fight' || key === 'bottom' ? Number(pick.value) || 0 : pick.value;
     store.set(key, state[key]);
     render();
@@ -881,6 +1053,11 @@ document.addEventListener('change', (event) => {
 });
 let typing = null;
 document.addEventListener('input', (event) => {
+  if (event.target.id === 'token') {
+    state.token = event.target.value.trim();
+    store.set('token', state.token);
+    return;
+  }
   if (event.target.id !== 'search') return;
   state.query = event.target.value;
   clearTimeout(typing);

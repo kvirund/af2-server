@@ -177,6 +177,22 @@ pub struct World {
     live: Arc<Mutex<HashMap<i64, LiveCharacter>>>,
     /// Characters with a letter they have not been told of.
     mail_notices: Arc<Mutex<HashSet<i64>>>,
+    /// Characters the web port is changing while nobody plays them: one such
+    /// change at a time, so two of them cannot write over each other.
+    editing: Arc<Mutex<HashSet<i64>>>,
+}
+
+/// Holds the right to change one character nobody is playing; dropping it
+/// gives the right back, whether the change went through or failed.
+pub struct EditGuard {
+    world: Arc<World>,
+    character: i64,
+}
+
+impl Drop for EditGuard {
+    fn drop(&mut self) {
+        self.world.editing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&self.character);
+    }
 }
 
 /// The world as it stands. A handler takes a pointer out of this when a message
@@ -220,6 +236,7 @@ impl World {
             online: Arc::default(),
             live: Arc::default(),
             mail_notices: Arc::default(),
+            editing: Arc::default(),
         }
     }
 
@@ -240,6 +257,7 @@ impl World {
             online: self.online.clone(),
             live: self.live.clone(),
             mail_notices: self.mail_notices.clone(),
+            editing: self.editing.clone(),
         }
     }
 
@@ -255,12 +273,6 @@ impl World {
     pub fn admin_channel(&self, character: i64) -> Option<mpsc::Sender<AdminJob>> {
         let entries = self.online.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         entries.get(&character).map(|entry| entry.admin.clone())
-    }
-
-    /// Who is playing right now, for the admin API to name them.
-    pub fn online_characters(&self) -> Vec<i64> {
-        let entries = self.online.entries.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        entries.keys().copied().collect()
     }
 
     pub fn release(&self, character: i64, connection: u64) {
@@ -295,6 +307,13 @@ impl World {
 
     pub fn live_one(&self, id: i64) -> Option<LiveCharacter> {
         self.live.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&id).cloned()
+    }
+
+    /// Takes the right to change a character nobody is playing, for as long as
+    /// the guard lives. `None` when another change holds it already.
+    pub fn begin_edit(self: &Arc<Self>, character: i64) -> Option<EditGuard> {
+        let taken = self.editing.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(character);
+        taken.then(|| EditGuard { world: self.clone(), character })
     }
 
     /// Offers live only while the server runs, so their ids need not last.

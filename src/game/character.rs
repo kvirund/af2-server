@@ -321,6 +321,7 @@ pub async fn send_update(conn: &Conn, player: &Player) -> Result<()> {
 pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32, multiplier: f64) -> Result<()> {
     let gained = (f64::from(experience) * multiplier).round() as i64;
     let cost = perks::effects(conn, player).level_cost;
+    let was = player.data.level;
     let reached = add_experience(&conn.world.settings.progression, &mut player.data, gained, cost);
     conn.save(player).await?;
     skills::give(conn, player, skills::share(&conn.world.settings.skills, gained)).await?;
@@ -350,13 +351,16 @@ pub async fn award_experience(conn: &Conn, player: &mut Player, experience: i32,
         conn.log(&format!("   -> 103 level {level}"));
     }
 
-    if !reached.is_empty() {
+    // A level lost shows nowhere else: the panel is drawn from these details.
+    if !reached.is_empty() || player.data.level != was {
         send_details(conn, player, msg::CHARACTER_UPDATE).await?;
     }
     Ok(())
 }
 
-/// Returns each level reached, in order.
+/// Returns each level reached, in order. A negative amount walks back down the
+/// same levels, which is how experience is taken away; the first level and no
+/// experience at all is as low as it goes.
 fn add_experience(
     progression: &crate::config::ProgressionSettings,
     character: &mut CharacterData,
@@ -372,6 +376,11 @@ fn add_experience(
         character.level += 1;
         reached.push(character.level);
     }
+    while character.experience < 0 && character.level > 1 {
+        character.level -= 1;
+        character.experience += progression.experience_needed(character.level, cost);
+    }
+    character.experience = character.experience.max(0);
     reached
 }
 
@@ -441,6 +450,17 @@ mod tests {
         assert_eq!(add_experience(&progression(), &mut character, 35, 1.0), vec![2, 3]);
         assert_eq!(character.level, 3);
         assert_eq!(character.experience, 5);
+    }
+
+    #[test]
+    fn experience_taken_away_walks_the_levels_back() {
+        let mut character = CharacterData { level: 3, experience: 5, ..Default::default() };
+        // Level 2 needs 20, level 1 needs 10: 25 back is level 2 with no experience.
+        assert!(add_experience(&progression(), &mut character, -25, 1.0).is_empty());
+        assert_eq!((character.level, character.experience), (2, 0));
+        // Below the first level there is nowhere to go.
+        add_experience(&progression(), &mut character, -500, 1.0);
+        assert_eq!((character.level, character.experience), (1, 0));
     }
 
     #[test]

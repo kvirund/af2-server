@@ -1339,6 +1339,11 @@ impl Catalog {
         self.index.get(&id).map(|&position| &self.items[position])
     }
 
+    /// Every item the client knows, in file order.
+    pub fn all(&self) -> impl Iterator<Item = &CatalogItem> {
+        self.items.iter()
+    }
+
     pub fn for_sale(&self) -> impl Iterator<Item = &CatalogItem> {
         self.items.iter().filter(|item| item.cost > 0 || item.cost_item[0] > 0)
     }
