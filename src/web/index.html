@@ -102,9 +102,15 @@ main { min-width: 0; padding: 24px 32px 48px; max-width: 1240px; }
 .edit { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
 .edit h3 { margin: 0; font-size: 14px; }
 .edit p { margin: 0; font-size: 12px; color: var(--ink-3); }
-.edit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.edit-row .num-input { width: 104px; }
-.edit-row .wide { width: 100%; max-width: 240px; text-align: left; }
+/* One shape for every card: labelled rows, then the hint, then the button at
+   the bottom — the cards of a row are as tall as each other, so the buttons
+   stand on one line and are as wide as their card. */
+.edit-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.edit-row label { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.edit-row .num-input { width: 112px; }
+.edit-row .wide, .edit-row .pick { width: 100%; text-align: left; }
+.edit-go { margin-top: auto; padding-top: 2px; }
+.edit-go .btn { width: 100%; }
 .said { margin: 0 0 20px; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; background: var(--accent-soft); color: var(--accent); }
 .said.bad { background: var(--bad-soft); color: var(--bad); }
 
@@ -917,32 +923,34 @@ async function viewEdit(box) {
   <div class="section-title"><h2>Изменить</h2><span>${one.online ? 'персонаж в игре: изменения видно сразу' : 'персонажа нет в игре: правится сохранение'}</span></div>
   <div class="grid">
     <div class="card edit"><h3>Уровень и опыт</h3>
-      <div class="edit-row"><input id="set-level" class="num-input" type="number" min="1" max="${one.ladder.length}" step="1" value="${one.level}">
-        <input id="set-exp" class="num-input" type="number" min="0" step="100" value="${one.experience}">
-        <button class="btn go" data-admin="level">Установить</button></div>
-      <p>Уровень и опыт внутри него: до ${one.level + 1} уровня осталось ${n0.format(toLevel)}. Разница приходит как опыт за рыбу, с уровнями и долей в навык на изучении; уровень ниже нынешнего снимает их обратно.</p>
+      <div class="edit-row"><label for="set-level">Уровень</label><input id="set-level" class="num-input" type="number" min="1" max="${one.ladder.length}" step="1" value="${one.level}"></div>
+      <div class="edit-row"><label for="set-exp">Опыт</label><input id="set-exp" class="num-input" type="number" min="0" step="100" value="${one.experience}"></div>
+      <p>До ${one.level + 1} уровня осталось ${n0.format(toLevel)}. Разница приходит как опыт за рыбу, с уровнями и долей в навык на изучении; уровень ниже нынешнего снимает их обратно.</p>
+      <div class="edit-row edit-go"><button class="btn go" data-admin="level">Установить</button></div>
     </div>
     <div class="card edit"><h3>Деньги</h3>
-      <div class="edit-row"><input id="set-money" class="num-input" type="number" min="0" step="100" value="${one.money}">
-        <button class="btn go" data-admin="money">Установить</button></div>
-      <p>В кредитах, столько станет у персонажа.</p>
+      <div class="edit-row"><label for="set-money">Кредиты</label><input id="set-money" class="num-input" type="number" min="0" step="100" value="${one.money}"></div>
+      <p>Столько станет у персонажа.</p>
+      <div class="edit-row edit-go"><button class="btn go" data-admin="money">Установить</button></div>
     </div>
     <div class="card edit"><h3>Эрги</h3>
-      <div class="edit-row"><input id="set-premium" class="num-input" type="number" min="0" step="10" value="${one.premium}">
-        <button class="btn go" data-admin="premium">Установить</button></div>
+      <div class="edit-row"><label for="set-premium">Эрги</label><input id="set-premium" class="num-input" type="number" min="0" step="10" value="${one.premium}"></div>
       <p>Столько станет у персонажа.</p>
+      <div class="edit-row edit-go"><button class="btn go" data-admin="premium">Установить</button></div>
     </div>
     <div class="card edit"><h3>Репутация</h3>
+      <div class="edit-row"><label for="rep-faction">Фракция</label></div>
       <div class="edit-row"><select id="rep-faction" class="pick">${factions}</select></div>
-      <div class="edit-row"><input id="set-rep" class="num-input" type="number" min="0" step="50" value="${one.reputation[0]?.points ?? 0}">
-        <button class="btn go" data-admin="reputation">Установить</button></div>
+      <div class="edit-row"><label for="set-rep">Очки</label><input id="set-rep" class="num-input" type="number" min="0" step="50" value="${one.reputation[0]?.points ?? 0}"></div>
       <p>Очки выбранной фракции; уровень пересчитается сам.</p>
+      <div class="edit-row edit-go"><button class="btn go" data-admin="reputation">Установить</button></div>
     </div>
     <div class="card edit"><h3>Выдать предмет</h3>
+      <div class="edit-row"><label for="item-name">Предмет</label></div>
       <div class="edit-row"><input id="item-name" class="num-input wide" list="item-list" placeholder="Название или номер" autocomplete="off" spellcheck="false"></div>
-      <div class="edit-row"><input id="item-count" class="num-input" type="number" min="1" step="1" value="1">
-        <button class="btn go" data-admin="give">Выдать</button></div>
+      <div class="edit-row"><label for="item-count">Сколько штук</label><input id="item-count" class="num-input" type="number" min="1" step="1" value="1"></div>
       <p>Кладётся в сумки, как покупка: что не поместилось, не выдаётся. Это прибавка, а не «столько станет».</p>
+      <div class="edit-row edit-go"><button class="btn go" data-admin="give">Выдать</button></div>
       <datalist id="item-list">${list}</datalist>
     </div>
   </div>
